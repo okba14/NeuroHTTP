@@ -177,33 +177,40 @@ Submit a pull request
 
 ---
 
-### 🧾 License
+---
+
+## 🪪 License
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-blue?style=for-the-badge)](https://github.com/okba14/NeuroHTTP)
+[![Built with C](https://img.shields.io/badge/Built%20with-C99%20%2B%20Assembly-orange?style=for-the-badge&logo=c)]()
+[![AI Ready](https://img.shields.io/badge/AI-Native-purple?style=for-the-badge&logo=openai)]()
 
 **MIT License** — free for both commercial and academic use.  
-See the full license text in [LICENSE](./LICENSE).
+See the full text in [LICENSE](./LICENSE).
 
 ---
 
-### 🧬 Author
+## 🧬 Author
 
-**NeuroHTTP** is a concept and prototype developed by  
-👨‍💻 **GUIAR OQBA** 🇩🇿  
-*Focused on low-level performance, AI infrastructure, and modern web systems.*
+**👨‍💻 GUIAR OQBA** 🇩🇿  
+Creator of **NeuroHTTP** — passionate about low-level performance, AI infrastructure, and modern web systems.
 
----
+> _“Built in Algeria — Empowering the next generation of AI-native infrastructure.”_ 🇩🇿  
+> © 2025 GUIAR OQBA. All rights reserved.
 
 <p align="center">
-  <sub>© 2025 GUIAR OQBA — Proudly built in Algeria-Elkantara 🇩🇿 | Empowering the next generation of AI-native infrastructure.</sub>
+  <img src="https://img.shields.io/badge/Made%20in-Algeria-006233?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAQCAYAAADJViUEAAAAVklEQVQoz2NgoBAw4v///zH5j4GBQYyBgRj4z0SfwYHBv8nAwMCfMZkABhYGBgYGxv+HQ0P5n8DBwYN5wMDAwMiJrQxjYCgYGBg8EUUioM4xjAAAyNg4MSceOtwAAAABJRU5ErkJggg==">
 </p>
+
+---
 
 ## ⭐ Support the Project
 
 [![GitHub Stars](https://img.shields.io/github/stars/okba14/NeuroHTTP?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/okba14/NeuroHTTP?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/forks)
 [![Follow Developer](https://img.shields.io/badge/Follow-GUIAR%20OQBA-black?style=for-the-badge&logo=github)](https://github.com/okba14)
-[![Made in Algeria](https://img.shields.io/badge/Made%20in-Algeria-006233?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAQCAYAAADJViUEAAAAVklEQVQoz2NgoBAw4v///zH5j4GBQYyBgRj4z0SfwYHBv8nAwMCfMZkABhYGBgYGxv+HQ0P5n8DBwYN5wMDAwMiJrQxjYCgYGBg8EUUioM4xjAAAyNg4MSceOtwAAAABJRU5ErkJggg==)]()
-
----
+[![Community](https://img.shields.io/badge/Join-Community-blueviolet?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/discussions)
 
 If you believe in the vision of a **fast, AI-native web layer**,  
 please ⭐ the repository and share it — every star fuels the open-source ecosystem and helps **NeuroHTTP** grow.

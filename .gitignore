@@ -1,0 +1,54 @@
+# Build artifacts
+build/
+bin/
+obj/
+*.o
+*.out
+*.exe
+*.so
+*.a
+
+# Compilers / editors
+*.dSYM/
+*.d
+*.lst
+*.map
+
+# Temp & logs
+*~
+*.swp
+*.swo
+*.tmp
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Dist / packaging
+dist/
+release/
+*.tar.gz
+*.zip
+
+# Core dumps
+core
+core.*
+
+# Runtime
+logs/
+*.pid
+
+# Secrets
+.env
+*.key
+*.pem
+
+# Misc
+tags

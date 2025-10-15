@@ -36,7 +36,8 @@ jobs:
             exit 1
           fi
 
-      - name: 🧹 Cleanup & Finalize
+      - name: ✅ Mark job as successful
+        if: ${{ success() }}
         run: |
-          echo "🎉 All steps completed successfully."
-          ls -lh ./bin
+          echo "🎉 All steps completed successfully — marking workflow as passed!"
+          exit 0

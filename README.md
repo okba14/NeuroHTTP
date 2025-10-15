@@ -1,5 +1,6 @@
 # ⚡ NeuroHTTP — High-Performance AI-Native Web Server
 
+![Build](https://github.com/okba14/NeuroHTTP/actions/workflows/make.yml/badge.svg)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)]()
 [![Language](https://img.shields.io/badge/language-C%20%2B%20Assembly-blue?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)]()

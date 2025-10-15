@@ -2,8 +2,8 @@
 #define AIONIC_SERVER_H
 
 #include <stdint.h>
+#include <signal.h>
 #include "config.h"
-
 
 typedef struct {
     int server_fd;             
@@ -14,6 +14,8 @@ typedef struct {
     void *request_queue;       
     int max_connections;       
     int active_connections;     
+    int *epoll_fds;            // Array of epoll file descriptors for each thread
+    volatile sig_atomic_t running; // Flag to control server running state
     struct {
         uint64_t total_requests;
         uint64_t total_responses;
@@ -22,7 +24,6 @@ typedef struct {
         double avg_response_time;
     } stats;
 } Server;
-
 
 int server_init(Server *server, const Config *config);
 int server_start(Server *server);

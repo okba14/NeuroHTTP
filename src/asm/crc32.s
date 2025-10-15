@@ -1,101 +1,103 @@
-; crc32.s - حساب CRC32 محسن بلغة التجميع
-; يعتمد على معمارية x86-64 مع دعم SSE4.2
+; crc32.s - Optimized CRC32 calculation in assembly language
+; Based on x86-64 architecture with SSE4.2 support
 
-.global crc32_asm
+global crc32_asm
 
-; دالة: crc32_asm
-; المدخلات: 
-;   rdi - مؤشر إلى البيانات
-;   rsi - طول البيانات
-; المخرجات:
-;   eax - قيمة CRC32
+; Function: crc32_asm
+; Inputs:
+;   rdi - pointer to data
+;   rsi - length of data
+; Outputs:
+;   eax - CRC32 value
+
+section .text
 
 crc32_asm:
-    ; حفظ السجلات التي سنستخدمها
-    pushq %rbx
-    pushq %rcx
-    pushq %rdx
+    ; Save registers we will use
+    push rbx
+    push rcx
+    push rdx
     
     ; rdi = data
     ; rsi = length
     
-    ; التحقق من دعم SSE4.2
-    movq $1, %rax
+    ; Check for SSE4.2 support
+    mov rax, 1
     cpuid
-    movq %rbx, %rcx
-    shrq $20, %rcx  ; تحقق من بت SSE4.2
-    testq $1, %rcx
+    mov rcx, rbx
+    shr rcx, 20  ; Check SSE4.2 bit
+    test rcx, 1
     jz .no_sse42
     
-    ; استخدام تعليمات CRC32 SSE4.2
-    movq %rdi, %rdx
-    movq %rsi, %rcx
-    xorl %eax, %eax  ; تهيئة CRC بـ 0
+    ; Use SSE4.2 CRC32 instructions
+    mov rdx, rdi
+    mov rcx, rsi
+    xor eax, eax  ; Initialize CRC to 0
     
-    ; معالجة 8 بايت في كل مرة
-    movq %rcx, %rbx
-    shrq $3, %rbx  ; length / 8
+    ; Process 8 bytes at a time
+    mov rbx, rcx
+    shr rbx, 3  ; length / 8
     jz .process_bytes
     
 .crc_loop:
-    crc32q (%rdx), %rax
+    crc32 rax, qword [rdx]  ; Fixed: specify qword size
     
-    addq $8, %rdx
+    add rdx, 8
     
-    decq %rbx
+    dec rbx
     jnz .crc_loop
     
-    ; معالجة البايتات المتبقية
-    andq $7, %rcx  ; length % 8
+    ; Process remaining bytes
+    and rcx, 7  ; length % 8
     jz .done_sse
     
 .process_bytes:
-    movb (%rdx), %bl
-    crc32b %bl, %eax
+    mov bl, byte [rdx]  ; Fixed: specify byte size
+    crc32 eax, ebx
     
-    incq %rdx
+    inc rdx
     
-    decq %rcx
+    dec rcx
     jnz .process_bytes
     
 .done_sse:
-    ; نفي النتيجة (تطابق مع تنفيذ CRC32 القياسي)
-    notl %eax
+    ; Invert the result (to match standard CRC32 implementation)
+    not eax
     
     jmp .done
     
 .no_sse42:
-    ; تنفيذ CRC32 البرمجي (تبسيط)
-    movq %rdi, %rdx
-    movq %rsi, %rcx
-    movl $0xFFFFFFFF, %eax  ; تهيئة CRC بـ 0xFFFFFFFF
+    ; Software CRC32 implementation (simplified)
+    mov rdx, rdi
+    mov rcx, rsi
+    mov eax, 0xFFFFFFFF  ; Initialize CRC to 0xFFFFFFFF
     
 .software_loop:
-    movb (%rdx), %bl
-    xorl %ebx, %eax
+    mov bl, byte [rdx]  ; Fixed: specify byte size
+    xor eax, ebx
     
-    ; 8 تكرارات لكل بايت
-    movl $8, %edx
+    ; 8 iterations per byte
+    mov edx, 8
 .software_inner:
-    shrl $1, %eax
+    shr eax, 1
     jnc .no_xor
-    xorl $0xEDB88320, %eax
+    xor eax, 0xEDB88320
 .no_xor:
-    decq %rdx
+    dec edx
     jnz .software_inner
     
-    incq %rdx
+    inc rdx
     
-    decq %rcx
+    dec rcx
     jnz .software_loop
     
-    ; نفي النتيجة
-    notl %eax
+    ; Invert the result
+    not eax
     
 .done:
-    ; استعادة السجلات
-    popq %rdx
-    popq %rcx
-    popq %rbx
+    ; Restore registers
+    pop rdx
+    pop rcx
+    pop rbx
     
     ret

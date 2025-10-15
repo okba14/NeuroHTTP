@@ -1,6 +1,7 @@
 #ifndef AIONIC_AI_TOKENIZER_H
 #define AIONIC_AI_TOKENIZER_H
 
+#include <stddef.h>
 
 typedef struct {
     char *text;

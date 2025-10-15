@@ -1,6 +1,8 @@
 #ifndef AIONIC_AI_STATS_H
 #define AIONIC_AI_STATS_H
 
+#include <stdint.h>
+#include <time.h>
 
 typedef struct {
     char *model_name;

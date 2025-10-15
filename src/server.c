@@ -1,5 +1,5 @@
-#define MAX_EVENTS 1024   // عدد الأحداث القصوى في epoll_wait
-#define BACKLOG 128       // عدد الاتصالات المعلقة قبل accept
+#define MAX_EVENTS 1024   // Maximum number of events in epoll_wait
+#define BACKLOG 128       // Number of pending connections before accept
 #define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,21 +11,21 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/epoll.h>
-#include <fcntl.h>  // ← هذا المهم لـ fcntl, F_GETFL, F_SETFL, O_NONBLOCK
+#include <fcntl.h>  // Important for fcntl, F_GETFL, F_SETFL, O_NONBLOCK
 #include "server.h"
 #include "parser.h"
 #include "router.h"
 #include "stream.h"
 #include "utils.h"
 
-// تعريف بنية بيانات مؤشر الترابط
+// Thread data structure
 typedef struct {
     Server *server;
     int epoll_fd;
     int id;
 } ThreadData;
 
-// دالة مؤشر الترابط العاملة
+// Worker thread function
 static void *worker_thread(void *arg) {
     ThreadData *data = (ThreadData *)arg;
     Server *server = data->server;
@@ -34,30 +34,30 @@ static void *worker_thread(void *arg) {
     
     struct epoll_event events[MAX_EVENTS];
     
-    while (server->active_connections > 0) {
-        // انتظار الأحداث
+    while (server->running) {
+        // Wait for events
         int event_count = epoll_wait(data->epoll_fd, events, MAX_EVENTS, 100);
         
         if (event_count < 0) {
-            if (errno == EINTR) continue;  // مقاطعة بواسطة إشارة
+            if (errno == EINTR) continue;  // Interrupted by signal
             perror("epoll_wait");
             break;
         }
         
-        // معالجة الأحداث
+        // Process events
         for (int i = 0; i < event_count; i++) {
             int client_fd = events[i].data.fd;
             
             if (events[i].events & EPOLLIN) {
-                // بيانات جاهزة للقراءة
+                // Data ready to read
                 if (server_handle_request(server, client_fd) != 0) {
-                    // خطأ في معالجة الطلب، أغلق الاتصال
+                    // Error handling request, close connection
                     epoll_ctl(data->epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
                     close(client_fd);
                     server->active_connections--;
                 }
             } else if (events[i].events & (EPOLLHUP | EPOLLERR)) {
-                // خطأ في الاتصال أو إغلاقه
+                // Connection error or closed
                 epoll_ctl(data->epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
                 close(client_fd);
                 server->active_connections--;
@@ -76,15 +76,16 @@ int server_init(Server *server, const Config *config) {
     server->port = config->port;
     server->thread_count = config->thread_count;
     server->max_connections = config->max_connections;
+    server->running = 0; // Initially not running
     
-    // إنشاء مأخذ توصيل الخادم
+    // Create server socket
     server->server_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (server->server_fd < 0) {
         perror("socket");
         return -1;
     }
     
-    // تعيين خيارات المأخذ
+    // Set socket options
     int opt = 1;
     if (setsockopt(server->server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         perror("setsockopt");
@@ -92,7 +93,7 @@ int server_init(Server *server, const Config *config) {
         return -1;
     }
     
-    // ربط المأخذ بالمنفذ
+    // Bind socket to port
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
@@ -105,14 +106,14 @@ int server_init(Server *server, const Config *config) {
         return -1;
     }
     
-    // بدء الاستماع
+    // Start listening
     if (listen(server->server_fd, BACKLOG) < 0) {
         perror("listen");
         close(server->server_fd);
         return -1;
     }
     
-    // تهيئة مجمع مؤشرات الترابط
+    // Initialize thread pool
     server->thread_pool = malloc(sizeof(pthread_t) * server->thread_count);
     if (!server->thread_pool) {
         perror("malloc");
@@ -120,7 +121,7 @@ int server_init(Server *server, const Config *config) {
         return -1;
     }
     
-    // تهيئة طابور الطلبات
+    // Initialize request queue
     server->request_queue = malloc(sizeof(void *) * server->max_connections);
     if (!server->request_queue) {
         perror("malloc");
@@ -129,11 +130,26 @@ int server_init(Server *server, const Config *config) {
         return -1;
     }
     
+    // Initialize epoll fds array
+    server->epoll_fds = malloc(sizeof(int) * server->thread_count);
+    if (!server->epoll_fds) {
+        perror("malloc");
+        free(server->request_queue);
+        free(server->thread_pool);
+        close(server->server_fd);
+        return -1;
+    }
+    
+    // Initialize routes
+    init_routes();
+    
     return 0;
 }
 
 int server_start(Server *server) {
-    // إنشاء مؤشرات ترابط العاملين
+    server->running = 1; // Set running flag to true
+    
+    // Create worker threads
     for (int i = 0; i < server->thread_count; i++) {
         ThreadData *data = malloc(sizeof(ThreadData));
         if (!data) {
@@ -144,13 +160,16 @@ int server_start(Server *server) {
         data->server = server;
         data->id = i;
         
-        // إنشاء مثيل epoll لكل مؤشر ترابط
+        // Create epoll instance for each thread
         data->epoll_fd = epoll_create1(0);
         if (data->epoll_fd < 0) {
             perror("epoll_create1");
             free(data);
             continue;
         }
+        
+        // Store epoll fd in server structure
+        server->epoll_fds[i] = data->epoll_fd;
         
         if (pthread_create(&((pthread_t *)server->thread_pool)[i], NULL, worker_thread, data) != 0) {
             perror("pthread_create");
@@ -160,6 +179,26 @@ int server_start(Server *server) {
         }
     }
     
+    return 0;
+}
+
+int server_stop(Server *server) {
+    printf("Stopping server...\n");
+    
+    // Set running flag to false to signal threads to stop
+    server->running = 0;
+    
+    // Wait for threads to finish
+    for (int i = 0; i < server->thread_count; i++) {
+        pthread_join(((pthread_t *)server->thread_pool)[i], NULL);
+        
+        // Close epoll fd
+        if (server->epoll_fds[i] >= 0) {
+            close(server->epoll_fds[i]);
+        }
+    }
+    
+    printf("Server stopped\n");
     return 0;
 }
 
@@ -175,10 +214,14 @@ void server_cleanup(Server *server) {
     if (server->request_queue) {
         free(server->request_queue);
     }
+    
+    if (server->epoll_fds) {
+        free(server->epoll_fds);
+    }
 }
 
 int server_process_events(Server *server) {
-    // قبول الاتصالات الجديدة
+    // Accept new connections
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     
@@ -186,23 +229,23 @@ int server_process_events(Server *server) {
         int client_fd = accept(server->server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (client_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // لا المزيد من الاتصالات الجديدة
+                // No more new connections
                 break;
             }
             perror("accept");
             return -1;
         }
         
-        // تعيين المأخذ كغير محجوب - الآن ستعمل بشكل صحيح
+        // Set socket to non-blocking - now it will work correctly
         int flags = fcntl(client_fd, F_GETFL, 0);
         fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
         
-        // توزيع الاتصال على أحد مؤشرات الترابط
+        // Distribute connection to one of the threads
         int thread_id = server->active_connections % server->thread_count;
-        int epoll_fd = ((ThreadData *)((pthread_t *)server->thread_pool)[thread_id])->epoll_fd;
+        int epoll_fd = server->epoll_fds[thread_id];
         
         struct epoll_event event;
-        event.events = EPOLLIN | EPOLLET;  // وضع الحافة
+        event.events = EPOLLIN | EPOLLET;  // Edge-triggered mode
         event.data.fd = client_fd;
         
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) < 0) {
@@ -226,42 +269,59 @@ int server_handle_request(Server *server, int client_fd) {
     ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     
     if (bytes_read <= 0) {
-        return -1;  // خطأ أو إغلاق الاتصال
+        printf("DEBUG: No data received or connection closed\n");
+        return -1;  // Error or connection closed
     }
     
-    buffer[bytes_read] = '\0';  // تأكد من أن السلسلة منتهية
+    buffer[bytes_read] = '\0';  // Ensure the string is null-terminated
     
-    // تحليل الطلب
+    printf("DEBUG: Received request:\n%s\n", buffer);
+    
+    // Parse request
     HTTPRequest request;
     if (parse_http_request(buffer, &request) != 0) {
-        // خطأ في تحليل الطلب
+        printf("DEBUG: Failed to parse HTTP request\n");
+        // Error parsing request
         const char *error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
         send(client_fd, error_response, strlen(error_response), 0);
         return -1;
     }
     
-    // توجيه الطلب
+    printf("DEBUG: Parsed request - Method: %d, Path: %s\n", request.method, request.path);
+    
+    // Route request
     RouteResponse response;
     if (route_request(&request, &response) != 0) {
-        // خطأ في التوجيه
-        const char *error_response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        printf("DEBUG: Failed to route request\n");
+        // Error routing
+        const char *error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
         send(client_fd, error_response, strlen(error_response), 0);
+        free_http_request(&request);
         return -1;
     }
     
-    // إرسال الاستجابة
+    printf("DEBUG: Route response - Length: %zu, Is streaming: %d\n", response.length, response.is_streaming);
+    printf("DEBUG: Response data (first 200 bytes): %.*s\n", (int)(response.length > 200 ? 200 : response.length), response.data);
+    
+    // Send response
     if (response.is_streaming) {
-        // استجابة متدفقة
+        // Streaming response
+        printf("DEBUG: Sending streaming response\n");
         stream_response(client_fd, &response);
     } else {
-        // استجابة عادية
+        // Normal response
+        printf("DEBUG: Sending normal response\n");
         send(client_fd, response.data, response.length, 0);
     }
     
-    // تحديث الإحصائيات
+    // Update statistics
     server->stats.total_requests++;
     server->stats.total_responses++;
     server->stats.bytes_sent += response.length;
+    
+    // Free request and response memory
+    free_http_request(&request);
+    free_route_response(&response);
     
     return 0;
 }

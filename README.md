@@ -99,7 +99,11 @@ The first version focuses on simplicity and raw performance.
 
 ### 🧪 Example
 ```bash
+curl http://localhost:8080 
+curl http://localhost:8080/health
+curl http://localhost:8080/stats
 curl -X POST http://localhost:8080/v1/chat -d '{"prompt":"Hello"}'
+curl -X POST -H "Content-Type: application/json" -d '{"prompt":"Hello"}' http://localhost:8080/v1/chat
 ```
 Expected output:
 
@@ -149,8 +153,8 @@ Collaboration similar to what happened with Caddy, Envoy, and Nginx
 ```bash 
 git clone https://github.com/yourname/neurohttp.git
 cd neurohttp
-make
-./neurohttp
+make all 
+./bin/aionic
 ```
 
 
@@ -196,7 +200,7 @@ See the full text in [LICENSE](./LICENSE).
 **👨‍💻 GUIAR OQBA** 🇩🇿  
 Creator of **NeuroHTTP** — passionate about low-level performance, AI infrastructure, and modern web systems.
 
-> _“Built in Algeria — Empowering the next generation of AI-native infrastructure.”_ 🇩🇿  
+> _“Algeria- Elkantara — Empowering the next generation of AI-native infrastructure.”_ 🇩🇿  
 > © 2025 GUIAR OQBA. All rights reserved.
 
 <p align="center">

@@ -1,5 +1,7 @@
 # ⚡ NeuroHTTP — High-Performance AI-Native Web Server
 
+![GitHub stars](https://img.shields.io/github/stars/okba14/NeuroHTTP?style=social)
+![GitHub forks](https://img.shields.io/github/forks/okba14/NeuroHTTP?style=social)
 ![Build](https://github.com/okba14/NeuroHTTP/actions/workflows/make.yml/badge.svg)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)]()
 [![Language](https://img.shields.io/badge/language-C%20%2B%20Assembly-blue?style=flat-square)]()

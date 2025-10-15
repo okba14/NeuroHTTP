@@ -39,7 +39,6 @@
 </p>
 
 
----
 
 <video width="720" controls>
   <source src="https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4" type="video/mp4">
@@ -51,26 +50,29 @@
 
 ## 🚀 Overview
 
-**NeuroHTTP** (codename: *AIMux*) is a next-generation web server **purpose-built for AI workloads**.
+**NeuroHTTP** (codename: *AIMux*) is a next-generation web server **purpose-built for AI workloads** — designed from the ground up to meet the demands of modern inference, model routing, and data-intensive API communication.
 
-Unlike traditional servers such as Nginx, Apache, or Node.js, which were not optimized for AI’s unique I/O and data flow, **NeuroHTTP** is designed from the ground up to handle:
+Traditional web servers like **Nginx**, **Apache**, or **Node.js** were never optimized for AI's unique I/O and data streaming patterns. **NeuroHTTP** redefines this layer, enabling a new era of AI-native networking built for performance, concurrency, and precision.
 
-- 🧠 **AI streaming responses** (like ChatGPT’s long token-by-token replies)  
-- 📦 **Massive JSON payloads** and recurrent API calls  
-- ⚡ **Concurrent AI model routing** across multiple endpoints  
-- 🔌 **Real-time communication** using HTTP/3, WebSockets, and gRPC  
+It’s engineered to handle:
+- 🧠 **AI streaming responses** — efficient token-by-token delivery for LLMs and chat APIs.  
+- 📦 **Massive JSON payloads** — low-latency parsing and optimized memory throughput.  
+- ⚡ **Concurrent model routing** — multiplexed inference requests across multiple AI endpoints.  
+- 🔌 **Real-time communication** — leveraging HTTP/3, WebSockets, and gRPC for seamless integration.  
 
-**Goal:** Create the world’s first **AI-native web server** capable of serving real-time, high-throughput AI inference APIs efficiently.
+> **Goal:** Build the world’s first *AI-native web server* capable of delivering real-time, high-throughput inference APIs with zero overhead.
+
 
 ---
 
 ## 🎯 Why This Project Matters
 
-- 🔥 **No direct competitors** exist for AI-optimized web servers today.  
-- 🧩 **Built in C and Assembly**, outperforming Node.js, Python, and Go under load.  
-- 🌍 **The AI API economy is exploding** (OpenAI, HuggingFace, LangChain, etc.).  
-- 🧑‍💻 **Open-source friendly**, enabling a developer community to grow around it.  
-- ⚙️ **Designed for scale**, both in terms of concurrency and extensibility.
+- 🔥 **No true AI-native web servers exist** — NeuroHTTP pioneers a new category purpose-built for intelligent workloads.  
+- 🧩 **Implemented in C and Assembly**, achieving raw performance that outpaces Node.js, Python, and Go under heavy inference traffic.  
+- 🌍 **The AI API ecosystem is exploding** — from OpenAI and HuggingFace to LangChain and beyond — demanding infrastructure that can actually keep up.  
+- 🧑‍💻 **Fully open-source and developer-first**, empowering a growing community to experiment, extend, and integrate.  
+- ⚙️ **Architected for scale and modularity**, supporting high concurrency, multi-core routing, and plugin-driven extensibility.
+
 
 ---
 
@@ -78,13 +80,14 @@ Unlike traditional servers such as Nginx, Apache, or Node.js, which were not opt
 
 | Feature | Description |
 |----------|-------------|
-| ⚡ **Smart Thread Pool** | Dynamically distributes requests based on payload size and active models. |
-| 🧠 **AI Stream Mode** | Incremental response streaming over HTTP or WebSocket. |
-| 🧩 **Assembly-Optimized JSON Parser** | Blazing-fast parsing for large and nested AI payloads. |
-| 🔐 **Token Quota + API Keys** | Built-in security layer for developers and production APIs. |
-| 🛰️ **gRPC & HTTP/3 Ready** | Fully compatible with next-generation web protocols. |
-| 🧰 **Plug-in System (C Modules)** | Extend the server without recompilation. |
-| 📊 **Telemetry & Metrics** | Real-time stats: latency, throughput, memory footprint. |
+| ⚡ **Smart Thread Pool** | Adaptive thread scheduling that dynamically allocates workloads based on payload complexity and model concurrency. |
+| 🧠 **AI Stream Mode** | Incremental, token-based response streaming over HTTP/1.1, HTTP/3, or WebSocket — ideal for real-time AI inference. |
+| 🧩 **Assembly-Optimized JSON Parser** | Low-level SIMD-accelerated parser delivering ultra-fast performance for nested or large-scale AI payloads. |
+| 🔐 **Token Quota + API Keys** | Built-in authentication and request quota management designed for multi-tenant AI APIs. |
+| 🛰️ **gRPC & HTTP/3 Ready** | Full support for modern high-throughput protocols, ensuring forward compatibility and minimal latency. |
+| 🧰 **Plugin System (C Modules)** | Extend the server core via dynamically loaded C modules — no recompilation required. |
+| 📊 **Telemetry & Metrics** | Real-time observability: latency, throughput, memory footprint, and event tracing. |
+
 
 ---
 
@@ -239,15 +242,34 @@ Early adoption by AI startups needing real-time serving
 
 Collaboration similar to what happened with Caddy, Envoy, and Nginx
 
-# 🔧 Installation (Soon)
-```bash 
-git clone https://github.com/okba14/neurohttp.git
+## 🔧 Installation
 
-cd neurohttp
-make all 
+NeuroHTTP can be built directly from source on any Linux or Unix-like system.
+
+### 🧩 Prerequisites
+Make sure you have the following installed:
+- **GCC / Clang**
+- **Make**
+- **libpthread**, **libssl**, and **zlib** (for HTTP/3 and threading support)
+
+### ⚙️ Build & Run
+
+```bash
+# Clone the repository
+git clone https://github.com/okba14/NeuroHTTP.git
+
+# Navigate into the project directory
+cd NeuroHTTP
+
+# Build the project
+make all
+
+# Run the NeuroHTTP server
 ./bin/aionic
 ```
 
+
+---
 
 # 🧑‍💻 Contributing
 Contributions are welcome!
@@ -263,54 +285,65 @@ Submit a pull request
 
 ## 🪪 License & Credits
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg?style=for-the-badge)](./LICENSE)
-[![Open Source Love](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-red?style=for-the-badge)]()
-[![Made with C](https://img.shields.io/badge/Made%20with-C-blue.svg?style=for-the-badge)]()
-[![Assembly Optimized](https://img.shields.io/badge/Optimized%20with-Assembly-critical?style=for-the-badge)]()
-[![AI Ready](https://img.shields.io/badge/AI%20Native-Yes-purple?style=for-the-badge)]()
-[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge)]()
+<p align="center">
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="MIT License">
+  </a>
+  <img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-blue?style=for-the-badge" alt="Open Source Love">
+  <img src="https://img.shields.io/badge/Built%20with-C%20%2B%20Assembly-orange?style=for-the-badge&logo=c" alt="C + Assembly">
+  <img src="https://img.shields.io/badge/AI%20Native-Yes-purple?style=for-the-badge&logo=openai" alt="AI Native">
+  <img src="https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge" alt="Contributions Welcome">
+</p>
 
 ---
 
----
+**License:** [MIT](./LICENSE) — free for both commercial and academic use.  
+**Credits:** Built by **GUIAR OQBA**, with ❤️ from the open-source community.
 
-## 🪪 License
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
-[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-blue?style=for-the-badge)](https://github.com/okba14/NeuroHTTP)
-[![Built with C](https://img.shields.io/badge/Built%20with-C99%20%2B%20Assembly-orange?style=for-the-badge&logo=c)]()
-[![AI Ready](https://img.shields.io/badge/AI-Native-purple?style=for-the-badge&logo=openai)]()
-
-**MIT License** — free for both commercial and academic use.  
-See the full text in [LICENSE](./LICENSE).
 
 ---
 
 ## 🧬 Author
 
 **👨‍💻 GUIAR OQBA** 🇩🇿  
-Creator of **NeuroHTTP** — passionate about low-level performance, AI infrastructure, and modern web systems.
+Creator of **NeuroHTTP** — passionate about **low-level performance**, **AI infrastructure**, and **modern web systems**.
 
-> _“Algeria- Elkantara — Empowering the next generation of AI-native infrastructure.”_ 🇩🇿  
-> © 2025 GUIAR OQBA. All rights reserved.
+> _“Empowering the next generation of AI-native infrastructure — from Elkantara, Algeria.”_
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Made%20in-Algeria-006233?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAQCAYAAADJViUEAAAAVklEQVQoz2NgoBAw4v///zH5j4GBQYyBgRj4z0SfwYHBv8nAwMCfMZkABhYGBgYGxv+HQ0P5n8DBwYN5wMDAwMiJrQxjYCgYGBg8EUUioM4xjAAAyNg4MSceOtwAAAABJRU5ErkJggg==">
+  <img src="https://img.shields.io/badge/El%20Kantara-Algeria-006233?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAQCAYAAADJViUEAAAAVklEQVQoz2NgoBAw4v///zH5j4GBQYyBgRj4z0SfwYHBv8nAwMCfMZkABhYGBgYGxv+HQ0P5n8DBwYN5wMDAwMiJrQxjYCgYGBg8EUUioM4xjAAAyNg4MSceOtwAAAABJRU5ErkJggg==">
 </p>
+
+<p align="center">
+  <sub>© 2025 GUIAR OQBA — All rights reserved.</sub>
+</p>
+
 
 ---
 
 ## ⭐ Support the Project
 
-[![GitHub Stars](https://img.shields.io/github/stars/okba14/NeuroHTTP?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/stargazers)
-[![GitHub Forks](https://img.shields.io/github/forks/okba14/NeuroHTTP?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/forks)
-[![Follow Developer](https://img.shields.io/badge/Follow-GUIAR%20OQBA-black?style=for-the-badge&logo=github)](https://github.com/okba14)
-[![Community](https://img.shields.io/badge/Join-Community-blueviolet?style=for-the-badge&logo=github)](https://github.com/okba14/NeuroHTTP/discussions)
+<p align="center">
+  <a href="https://github.com/okba14/NeuroHTTP/stargazers">
+    <img src="https://img.shields.io/github/stars/okba14/NeuroHTTP?style=for-the-badge&logo=github" alt="GitHub Stars"/>
+  </a>
+  <a href="https://github.com/okba14/NeuroHTTP/forks">
+    <img src="https://img.shields.io/github/forks/okba14/NeuroHTTP?style=for-the-badge&logo=github" alt="GitHub Forks"/>
+  </a>
+  <a href="https://github.com/okba14">
+    <img src="https://img.shields.io/badge/Follow-GUIAR%20OQBA-black?style=for-the-badge&logo=github" alt="Follow Developer"/>
+  </a>
+  <a href="https://github.com/okba14/NeuroHTTP/discussions">
+    <img src="https://img.shields.io/badge/Join-Community-blueviolet?style=for-the-badge&logo=github" alt="Community"/>
+  </a>
+</p>
 
-If you believe in the vision of a **fast, AI-native web layer**,  
-please ⭐ the repository and share it — every star fuels the open-source ecosystem and helps **NeuroHTTP** grow.
+<p align="center">
+  If you believe in the vision of a <strong>fast, AI-native web layer</strong>, please ⭐ the repository and share it.<br/>
+  Every star fuels the open-source ecosystem and helps <strong>NeuroHTTP</strong> evolve. 🚀
+</p>
 
-> 💬 “**Fast. Modular. AI-Native.** That’s NeuroHTTP.”
+> 💬 “<strong>Fast. Modular. AI-Native.</strong> — That’s <strong>NeuroHTTP</strong>.”
 
 ---
 
@@ -323,4 +356,5 @@ please ⭐ the repository and share it — every star fuels the open-source ecos
 <p align="center">
   <sub>✨ Join the mission to redefine how the web talks to AI — one packet at a time.</sub>
 </p>
+
 

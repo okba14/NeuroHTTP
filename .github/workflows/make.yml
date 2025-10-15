@@ -9,32 +9,34 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # يمنع التعليق الطويل في حالة خطأ
+    timeout-minutes: 10
 
     steps:
-      - name: 📦 Checkout repository
+      - name: 🧭 Checkout repository
         uses: actions/checkout@v4
 
       - name: ⚙️ Install build dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y build-essential clang make nasm
 
-      - name: 🧱 Build project (Make)
+      - name: 🏗️ Build project
         run: |
           echo "🔧 Starting build..."
           make all
-          echo "✅ Build completed!"
+          echo "✅ Build completed successfully."
 
-      - name: 🧪 Run basic tests
+      - name: 🧪 Verify binary output
         run: |
           if [ -f "./bin/aionic" ]; then
-            echo "✅ Binary built successfully:"
-            ./bin/aionic --version || echo "ℹ️ Version flag not implemented yet."
+            echo "✅ Binary built successfully!"
+            ./bin/aionic --version || echo "ℹ️ No version flag implemented yet."
           else
             echo "❌ Binary not found!"
             exit 1
           fi
 
-      - name: 🏁 Finish
-        run: echo "🎉 All build & test steps completed successfully!"
+      - name: 🧹 Cleanup & Finalize
+        run: |
+          echo "🎉 All steps completed successfully."
+          ls -lh ./bin

@@ -101,3 +101,5 @@ crc32_asm:
     pop rbx
     
     ret
+
+segment .note.GNU-stack noexec

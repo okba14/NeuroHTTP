@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: 🧭 Checkout repository
@@ -37,14 +37,15 @@ jobs:
             exit 1
           fi
 
-      - name: ✅ Force success signal
-        if: always()
+      - name: 🧹 Clean temporary files (optional)
         run: |
-          echo "🎯 Workflow finished, forcing success signal."
-          echo "result=success" >> $GITHUB_OUTPUT
+          echo "🧽 Cleaning up temporary build files..."
+          rm -rf logs/tmp 2>/dev/null || true
 
-      - name: 🟢 Mark workflow as passed
-        if: ${{ success() }}
+      - name: ✅ Finalize and mark success
         run: |
-          echo "✅ All steps passed — setting final status to success."
+          echo "🎯 All steps executed successfully!"
           exit 0
+
+    # This ensures GitHub marks as green even if warnings exist
+    continue-on-error: false

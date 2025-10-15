@@ -1,16 +1,21 @@
-# ⚡ NeuroHTTP — High-Performance AI-Native Web Server
+<h1 align="center">⚡ NeuroHTTP — High-Performance AI-Native Web Server</h1>
 
-![GitHub stars](https://img.shields.io/github/stars/okba14/NeuroHTTP?style=social)
-![GitHub forks](https://img.shields.io/github/forks/okba14/NeuroHTTP?style=social)
-![Build](https://github.com/okba14/NeuroHTTP/actions/workflows/make.yml/badge.svg)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)]()
-[![Language](https://img.shields.io/badge/language-C%20%2B%20Assembly-blue?style=flat-square)]()
-[![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)]()
-[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Unix-lightgrey?style=flat-square)]()
-[![AI Ready](https://img.shields.io/badge/AI%20APIs-ready-purple?style=flat-square)]()
-[![Performance](https://img.shields.io/badge/speed-ultra%20fast-red?style=flat-square)]()
+<p align="center">
+  <img src="https://img.shields.io/github/stars/okba14/NeuroHTTP?style=social" />
+  <img src="https://img.shields.io/github/forks/okba14/NeuroHTTP?style=social" />
+  <img src="https://github.com/okba14/NeuroHTTP/actions/workflows/make.yml/badge.svg" />
+  <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" />
+  <img src="https://img.shields.io/badge/language-C%20%2B%20Assembly-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" />
+  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Unix-lightgrey?style=flat-square" />
+  <img src="https://img.shields.io/badge/AI%20APIs-ready-purple?style=flat-square" />
+  <img src="https://img.shields.io/badge/speed-ultra%20fast-red?style=flat-square" />
+</p>
 
-> **"Redefining how AI APIs communicate with the web — built from scratch in C and Assembly."**
+<p align="center"><em>
+"Redefining how AI APIs communicate with the web — built from scratch in C and Assembly."
+</em></p>
+
 
 ---
 

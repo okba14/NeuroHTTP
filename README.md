@@ -224,12 +224,20 @@ Phase 3	Optimized C/ASM JSON Parser
 Phase 4	Modular Plug-in System for custom extensions
 Phase 5	Open-source release with detailed benchmarks vs Nginx
 
-# 📊 Benchmark Goals (Planned)
-* Server	1K concurrent requests	Avg Latency	Memory (MB)
-* NeuroHTTP (C/ASM)	✅ Target: 2ms	🚀	< 10
-* Nginx	~8ms	⚡	12
-* Node.js (Express)	~15ms	🐢	60
-* Flask (Python)	~30ms	🐢	120
+# 📊 Benchmark 
+
+## Summary of Results
+
+```bash
+### Run:
+wrk -t4 -c100 -d30s --latency http://localhost:8080/
+```
+
+| Server   | Requests/sec | Total Requests | Avg Latency | p50   | p75     | p90      | p99       | Max Latency | Transfer/sec |
+|----------|--------------|----------------|-------------|-------|---------|----------|-----------|-------------|--------------|
+| nginx    | 6743         | 202,701        | 80ms        | 11.79ms | 13.23ms | 218.75ms | 1.12s    | 1.33s       | 1.02MB       |
+| NeuroHTTP   | 1621         | 48,762         | 61.22ms     | 43.08ms | 100.72ms | 104.62ms | 114.27ms | 135.85ms    | 4.94MB       |
+
 
 # 💡 Vision
 * The web was built for documents.

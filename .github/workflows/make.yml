@@ -1,4 +1,5 @@
 name: Build & Test (C/ASM NeuroHTTP)
+run-name: Build and Test NeuroHTTP on ${{ github.ref_name }}
 
 on:
   push:
@@ -36,8 +37,18 @@ jobs:
             exit 1
           fi
 
-      - name: ✅ Force clean exit
+      - name: ✅ Mark workflow success
+        if: ${{ success() }}
         run: |
-          echo "🎯 Forcing clean exit to ensure GitHub Actions marks this workflow as passed."
-          sleep 1
-          exit 0
+          echo "🎯 All steps completed successfully!"
+          echo "BUILD_STATUS=success" >> $GITHUB_ENV
+
+      - name: 🚀 Finalize job
+        run: |
+          if [ "$BUILD_STATUS" = "success" ]; then
+            echo "✅ Workflow finished cleanly — marking as passed."
+            exit 0
+          else
+            echo "❌ Something went wrong, marking as failed."
+            exit 1
+          fi

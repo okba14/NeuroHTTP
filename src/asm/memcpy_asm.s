@@ -1,4 +1,3 @@
-.section .note.GNU-stack,"",@progbits
 ; memcpy_asm.s - Optimized memory copy in assembly language
 ; Based on x86-64 architecture
 
@@ -125,3 +124,4 @@ memcpy_asm:
     ; Return destination pointer
     mov rax, rdi
     ret
+segment .note.GNU-stack noexec

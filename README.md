@@ -203,7 +203,8 @@ Collaboration similar to what happened with Caddy, Envoy, and Nginx
 
 # 🔧 Installation (Soon)
 ```bash 
-git clone https://github.com/yourname/neurohttp.git
+git clone https://github.com/okba14/neurohttp.git
+
 cd neurohttp
 make all 
 ./bin/aionic

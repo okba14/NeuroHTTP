@@ -22,11 +22,22 @@
 
 ## 🎬 Project Demo — AIONIC NeuroHTTP
 
-See the project in action below 👇
+<p align="center">
+  <em>Experience the raw performance and intelligence of NeuroHTTP in action.</em>
+</p>
 
-[![Watch the demo](https://img.shields.io/badge/▶️%20Watch-Demo-blue?style=for-the-badge)](https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4)
+<p align="center">
+  <a href="https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4">
+    <img src="https://img.shields.io/badge/▶️%20Watch%20Demo-blue?style=for-the-badge" alt="Watch Demo">
+  </a>
+</p>
 
-> This demo showcases **NeuroHTTP**, a high-performance AI-driven web server written in C and Assembly.
+<p align="center">
+  <sub>
+    This demo showcases <strong>NeuroHTTP</strong> — a high-performance, AI-driven web server built entirely in <strong>C</strong> and <strong>Assembly</strong>, redefining how AI APIs communicate with the web.
+  </sub>
+</p>
+
 
 ---
 

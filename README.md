@@ -11,6 +11,25 @@
 
 ---
 
+
+## 🎬 Project Demo — AIONIC NeuroHTTP
+
+See the project in action below 👇
+
+[![Watch the demo](https://img.shields.io/badge/▶️%20Watch-Demo-blue?style=for-the-badge)](https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4)
+
+> This demo showcases **NeuroHTTP**, a high-performance AI-driven web server written in C and Assembly.
+
+---
+
+<video width="720" controls>
+  <source src="https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
+
+---
+
 ## 🚀 Overview
 
 **NeuroHTTP** (codename: *AIMux*) is a next-generation web server **purpose-built for AI workloads**.

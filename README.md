@@ -50,28 +50,80 @@ Unlike traditional servers such as Nginx, Apache, or Node.js, which were not opt
 
 ---
 
-## 🧱 Project Architecture
+## 📂 Project Structure
+The **AIONIC AI Web Server** is organized for modularity, performance, and clarity — following a clean separation between **core**, **AI**, **ASM**, and **plugin** layers.
+
 ```bash 
 /neurohttp
-├── src/
-│ ├── main.c ← Entry point
-│ ├── server.c ← Server core and thread pool
-│ ├── parser.c ← HTTP & JSON parsing
-│ ├── stream.c ← Streaming response management
-│ ├── plugins.c ← Dynamic module system (C)
-│ ├── asm/
-│ │ ├── memcpy_fast.s
-│ │ ├── json_tokenizer.s
-│ │ └── crc32_asm.s
-│ └── utils.c
-├── include/
-│ ├── server.h
-│ ├── parser.h
-│ ├── config.h
-├── Makefile
-├── README.md
-└── tests/
-└── test_requests.c
+├── .github/ # GitHub Actions CI/CD workflows and automation
+├── benchmarks/ # Performance benchmarking scripts and reports
+│ └── benchmark.py # Python benchmark runner for latency and throughput tests
+│
+├── config/ # Configuration files
+│ └── aionic.conf # Default server configuration (port, threads, cache, AI models)
+│
+├── docs/ # Technical documentation
+│ ├── ARCHITECTURE.md # Detailed system design & module interactions
+│ ├── PERFORMANCE.md # Performance tuning, memory footprint, benchmarks
+│ └── ROADMAP.md # Planned features and development milestones
+│
+├── include/ # Public header files for all modules
+│ ├── ai/ # AI-related headers
+│ │ ├── prompt_router.h # AI model routing & dispatching layer
+│ │ ├── stats.h # AI stats collection & monitoring
+│ │ └── tokenizer.h # Tokenization and prompt pre-processing logic
+│ ├── cache.h # In-memory caching system
+│ ├── config.h # Server configuration loader
+│ ├── firewall.h # Request filtering and security layer
+│ ├── optimizer.h # Runtime performance optimizer
+│ ├── parser.h # HTTP request parser (manual implementation in C)
+│ ├── plugin.h # Plugin manager and shared library loader
+│ ├── router.h # Core HTTP router and route dispatcher
+│ ├── server.h # Main server core and worker thread manager
+│ ├── stream.h # Streaming and chunked response system
+│ ├── utils.h # Helper utilities (logging, timing, etc.)
+│ └── utils.sh # Developer utility scripts
+│
+├── plugins/ # Dynamically loadable plugins (extensible features)
+│ ├── limiter.c # Rate limiting / request throttling plugin
+│ ├── logstats.c # Real-time log statistics collector
+│ └── openai_proxy.c # Proxy integration for external AI APIs
+│
+├── src/ # Core source code
+│ ├── ai/ # AI logic implementation
+│ │ ├── prompt_router.c # Handles model selection and routing
+│ │ ├── stats.c # Collects and exposes AI processing stats
+│ │ └── tokenizer.c # Efficient tokenization engine
+│ ├── asm/ # Assembly-optimized performance routines
+│ │ ├── crc32.s # CRC32 checksum calculation (fast path)
+│ │ ├── json_fast.s # Accelerated JSON parsing
+│ │ └── memcpy_asm.s # Optimized memory copy routine
+│ ├── cache.c # Caching implementation
+│ ├── common.h # Common macros and type definitions
+│ ├── config.c # Config file parser
+│ ├── firewall.c # Firewall & security checks
+│ ├── main.c # Entry point and main loop (server bootstrap)
+│ ├── optimizer.c # Runtime performance optimizer logic
+│ ├── parser.c # HTTP parser and header extractor
+│ ├── plugin.c # Plugin loader and registry
+│ ├── router.c # Core HTTP route resolution and dispatch
+│ ├── server.c # Thread pool, socket management, and event loop
+│ ├── stream.c # Streaming API and chunked response handler
+│ └── utils.c # Utility functions (logging, timers, memory)
+│
+├── tests/ # Unit and integration tests
+│ ├── test_json.c # Tests for JSON parser
+│ ├── test_server.c # Core server tests
+│ └── test_streaming.c # Streaming response validation
+│
+├── .gitignore # Ignored files and directories
+├── CODE_OF_CONDUCT.md # Contributor behavior guidelines
+├── CONTRIBUTING.md # How to contribute to AIONIC
+├── LICENSE # Open-source license (MIT / custom)
+├── Makefile # Build system (C + ASM compilation)
+├── README.md # Main documentation and usage instructions
+├── SECURITY.md # Security policy and vulnerability reporting
+└── stats.json # Runtime stats snapshot (for debugging)
 ```
 ---
 

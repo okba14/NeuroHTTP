@@ -20,6 +20,19 @@
 ---
 
 
+## Benchmark Comparison
+
+For detailed benchmark results comparing NeuroHTTP and NGINX, see [benchmark.md](benchmark.md)
+
+## Features
+- AI-powered routing
+- High-performance caching
+
+  
+
+---
+
+
 ## 🎬 Project Demo — AIONIC NeuroHTTP
 
 <p align="center">
@@ -47,6 +60,7 @@
 
 
 ---
+
 
 ## 🚀 Overview
 

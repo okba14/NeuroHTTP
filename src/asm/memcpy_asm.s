@@ -1,3 +1,4 @@
+.section .note.GNU-stack,"",@progbits
 ; memcpy_asm.s - Optimized memory copy in assembly language
 ; Based on x86-64 architecture
 

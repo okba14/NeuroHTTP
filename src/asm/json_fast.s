@@ -144,3 +144,7 @@ json_fast_tokenizer:
     mov rsp, rbp
     pop rbp
     ret
+
+segment .note.GNU-stack noexec
+
+    

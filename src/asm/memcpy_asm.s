@@ -1,124 +1,126 @@
-; memcpy_asm.s - نسخ ذاكرة محسن بلغة التجميع
-; يعتمد على معمارية x86-64
+; memcpy_asm.s - Optimized memory copy in assembly language
+; Based on x86-64 architecture
 
-.global memcpy_asm
+global memcpy_asm
 
-; دالة: memcpy_asm
-; المدخلات: 
-;   rdi - وجهة الذاكرة
-;   rsi - مصدر الذاكرة
-;   rdx - عدد البايتات لنسخها
-; المخرجات:
-;   rdi - مؤشر إلى وجهة الذاكرة
+; Function: memcpy_asm
+; Inputs:
+;   rdi - memory destination
+;   rsi - memory source
+;   rdx - number of bytes to copy
+; Outputs:
+;   rdi - pointer to memory destination
+
+section .text
 
 memcpy_asm:
-    ; حفظ السجلات التي سنستخدمها
-    pushq %rbx
-    pushq %rcx
-    pushq %rsi
+    ; Save registers we will use
+    push rbx
+    push rcx
+    push rsi
     
     ; rdi = dest
     ; rsi = src
     ; rdx = count
     
-    ; التحقق من العد الصفري
-    testq %rdx, %rdx
+    ; Check for zero count
+    test rdx, rdx
     jz .done
     
-    ; نسخ بايت واحد في كل مرة للعدد الصغير
-    cmpq $16, %rdx
+    ; Copy one byte at a time for small counts
+    cmp rdx, 16
     jb .copy_byte
     
-    ; التحقق من محاذاة الذاكرة
-    testq $15, %rdi
+    ; Check memory alignment
+    test rdi, 15
     jnz .copy_unaligned
     
-    ; نسخ 16 بايت في كل مرة (محاذاة)
-    movq %rdx, %rcx
-    shrq $4, %rcx  ; count / 16
+    ; Copy 16 bytes at a time (aligned)
+    mov rcx, rdx
+    shr rcx, 4  ; count / 16
     jz .copy_remaining
     
 .copy_loop:
-    movdqu (%rsi), %xmm0
-    movdqu %xmm0, (%rdi)
+    movdqu xmm0, [rsi]
+    movdqu [rdi], xmm0
     
-    addq $16, %rsi
-    addq $16, %rdi
+    add rsi, 16
+    add rdi, 16
     
-    decq %rcx
+    dec rcx
     jnz .copy_loop
     
-    ; نسخ البايتات المتبقية
-    andq $15, %rdx  ; count % 16
+    ; Copy remaining bytes
+    and rdx, 15  ; count % 16
     jz .done
     
 .copy_remaining:
-    movq %rdx, %rcx
+    mov rcx, rdx
 .copy_remaining_loop:
-    movb (%rsi), %al
-    movb %al, (%rdi)
+    mov al, [rsi]
+    mov [rdi], al
     
-    incq %rsi
-    incq %rdi
+    inc rsi
+    inc rdi
     
-    decq %rcx
+    dec rcx
     jnz .copy_remaining_loop
     
     jmp .done
     
 .copy_unaligned:
-    ; نسخ 8 بايت في كل مرة (غير محاذاة)
-    movq %rdx, %rcx
-    shrq $3, %rcx  ; count / 8
+    ; Copy 8 bytes at a time (unaligned)
+    mov rcx, rdx
+    shr rcx, 3  ; count / 8
     jz .copy_byte_remaining
     
 .copy_unaligned_loop:
-    movq (%rsi), %rax
-    movq %rax, (%rdi)
+    mov rax, [rsi]
+    mov [rdi], rax
     
-    addq $8, %rsi
-    addq $8, %rdi
+    add rsi, 8
+    add rdi, 8
     
-    decq %rcx
+    dec rcx
     jnz .copy_unaligned_loop
     
-    ; نسخ البايتات المتبقية
-    andq $7, %rdx  ; count % 8
+    ; Copy remaining bytes
+    and rdx, 7  ; count % 8
     jz .done
     
 .copy_byte_remaining:
-    movq %rdx, %rcx
+    mov rcx, rdx
 .copy_byte_loop:
-    movb (%rsi), %al
-    movb %al, (%rdi)
+    mov al, [rsi]
+    mov [rdi], al
     
-    incq %rsi
-    incq %rdi
+    inc rsi
+    inc rdi
     
-    decq %rcx
+    dec rcx
     jnz .copy_byte_loop
     
     jmp .done
     
 .copy_byte:
-    ; نسخ بايت واحد في كل مرة
-    movq %rdx, %rcx
+    ; Copy one byte at a time
+    mov rcx, rdx
 .copy_byte_only:
-    movb (%rsi), %al
-    movb %al, (%rdi)
+    mov al, [rsi]
+    mov [rdi], al
     
-    incq %rsi
-    incq %rdi
+    inc rsi
+    inc rdi
     
-    decq %rcx
+    dec rcx
     jnz .copy_byte_only
     
 .done:
-    ; استعادة السجلات
-    popq %rsi
-    popq %rcx
-    popq %rbx
+    ; Restore registers
+    pop rsi
+    pop rcx
+    pop rbx
     
-    ; إرجاع مؤشر الوجهة
-    movq %rdi, %rax
+    ; Return destination pointer
+    mov rax, rdi
     ret

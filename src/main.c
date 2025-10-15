@@ -4,7 +4,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <time.h>  // مهم لـ nanosleep
+#include <time.h>  // Important for nanosleep
 #include "server.h"
 #include "config.h"
 #include "parser.h"
@@ -16,30 +16,30 @@
 #include "ai/tokenizer.h"
 #include "ai/stats.h"
 
-// متغير عام للتحكم في تشغيل الخادم
+// Global variable to control server running state
 volatile sig_atomic_t running = 1;
 
-// معالج إشارات الإغلاق الأنيق
+// Signal handler for graceful shutdown
 void handle_signal(int sig) {
     printf("\nReceived signal %d, shutting down gracefully...\n", sig);
     running = 0;
 }
 
 int main(int argc, char *argv[]) {
-    (void)argc;  // تجنب تحذير المعلمة غير المستخدمة
-    (void)argv;  // تجنب تحذير المعلمة غير المستخدمة
+    (void)argc;  // Avoid unused parameter warning
+    (void)argv;  // Avoid unused parameter warning
     
     printf("========================================\n");
     printf("    AIONIC AI Web Server v1.0\n");
     printf("========================================\n");
     
-    // تسجيل معالجات الإشارات
+    // Register signal handlers
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
     
     printf("Starting AIONIC Server...\n");
     
-    // تحميل الإعدادات
+    // Load configuration
     Config config;
     if (load_config("config/aionic.conf", &config) != 0) {
         fprintf(stderr, "❌ Failed to load configuration\n");
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     printf("   - Threads: %d\n", config.thread_count);
     printf("   - Max Connections: %d\n", config.max_connections);
     
-    // تهيئة التخزين المؤقت
+    // Initialize cache
     if (config.enable_cache && cache_init(config.cache_size, config.cache_ttl) != 0) {
         fprintf(stderr, "❌ Failed to initialize cache\n");
         free_config(&config);
@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
         printf("✅ Cache initialized (%d entries, %d TTL)\n", config.cache_size, config.cache_ttl);
     }
     
-    // تهيئة جدار الحماية
+    // Initialize firewall
     if (config.enable_firewall && firewall_init(&config) != 0) {
         fprintf(stderr, "❌ Failed to initialize firewall\n");
         if (config.enable_cache) cache_cleanup();
@@ -74,7 +74,7 @@ int main(int argc, char *argv[]) {
         printf("✅ Firewall initialized\n");
     }
     
-    // تهيئة المحسن
+    // Initialize optimizer
     if (config.enable_optimization && optimizer_init(&config) != 0) {
         fprintf(stderr, "❌ Failed to initialize optimizer\n");
         if (config.enable_firewall) firewall_cleanup();
@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
         printf("✅ Optimizer initialized\n");
     }
     
-    // تهيئة موجه الطلبات الذكي
+    // Initialize AI prompt router
     if (prompt_router_init() != 0) {
         fprintf(stderr, "❌ Failed to initialize AI prompt router\n");
         if (config.enable_optimization) optimizer_cleanup();
@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
     
     printf("✅ AI prompt router initialized\n");
     
-    // تهيئة المميز
+    // Initialize tokenizer
     if (tokenizer_init() != 0) {
         fprintf(stderr, "❌ Failed to initialize tokenizer\n");
         prompt_router_cleanup();
@@ -112,7 +112,7 @@ int main(int argc, char *argv[]) {
     
     printf("✅ Tokenizer initialized\n");
     
-    // تهيئة جامع الإحصائيات
+    // Initialize stats collector
     if (stats_init("stats.json", 300) != 0) {
         fprintf(stderr, "❌ Failed to initialize stats collector\n");
         tokenizer_cleanup();
@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
     
     printf("✅ Stats collector initialized\n");
     
-    // تهيئة نظام الموديولات
+    // Initialize plugin system
     if (plugin_init("plugins") != 0) {
         fprintf(stderr, "❌ Failed to initialize plugin system\n");
         stats_cleanup();
@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
     
     printf("✅ Plugin system initialized\n");
     
-    // إنشاء وتشغيل الخادم
+    // Create and start server
     Server server;
     if (server_init(&server, &config) != 0) {
         fprintf(stderr, "❌ Failed to initialize server\n");
@@ -175,7 +175,7 @@ int main(int argc, char *argv[]) {
     printf("   Press Ctrl+C to stop the server\n");
     printf("========================================\n");
     
-    // الحلقة الرئيسية للخادم
+    // Main server loop
     while (running) {
         server_process_events(&server);
         if (config.enable_optimization) {
@@ -183,7 +183,7 @@ int main(int argc, char *argv[]) {
         }
         stats_auto_save();
         
-        // استخدام nanosleep بدلاً من usleep
+        // Use nanosleep instead of usleep
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = 100000000; // 100ms = 100,000,000 nanoseconds
@@ -192,7 +192,7 @@ int main(int argc, char *argv[]) {
     
     printf("\n🛑 Shutting down AIONIC Server...\n");
     
-    // تنظيف الموارد عند الخروج
+    // Clean up resources on exit
     server_stop(&server);
     server_cleanup(&server);
     plugin_cleanup();

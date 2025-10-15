@@ -1,32 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
-#include <string.h>
-#include <stdlib.h>
 #include "tokenizer.h"
-#include <string.h>
-#include <stdlib.h>
 #include "utils.h"
-#include <string.h>
-#include <stdlib.h>
 
-// تعريف بنئة الرمز المميز
-typedef struct {
-    char *text;
-    int id;
-    int type;  // 0: word, 1: punctuation, 2: number, 3: special
-} Token;
-
-// تعريف بنئة المميز
+// Tokenizer structure definition
 typedef struct {
     Token *tokens;
     int token_count;
@@ -37,19 +18,19 @@ typedef struct {
 
 static Tokenizer global_tokenizer;
 
-// دالة للتحقق مما إذا كان الحرف هو علامة ترقيم
+// Function to check if a character is punctuation
 static int is_punctuation(char c) {
     return c == '.' || c == ',' || c == '!' || c == '?' || c == ';' || c == ':' || 
            c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}' || 
            c == '\"' || c == '\'' || c == '-' || c == '_';
 }
 
-// دالة للتحقق مما إذا كان الحرف هو رقم
+// Function to check if a character is part of a number
 static int is_number_char(char c) {
     return isdigit(c) || c == '.';
 }
 
-// دالة لتقسيم النص إلى كلمات
+// Function to split text into tokens
 static int tokenize_text(const char *text, Token **tokens, int *token_count) {
     if (!text || !tokens || !token_count) {
         return -1;
@@ -65,7 +46,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
     
     const char *ptr = text;
     while (*ptr) {
-        // تخطي المسافات البيضاء
+        // Skip whitespace
         while (*ptr && isspace(*ptr)) {
             ptr++;
         }
@@ -74,7 +55,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
             break;
         }
         
-        // تحديد نوع الرمز
+        // Determine token type
         int type = 0;  // word
         if (is_punctuation(*ptr)) {
             type = 1;  // punctuation
@@ -82,7 +63,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
             type = 2;  // number
         }
         
-        // استخراج الرمز
+        // Extract token
         const char *start = ptr;
         while (*ptr) {
             if (type == 0 && (isspace(*ptr) || is_punctuation(*ptr))) {
@@ -95,7 +76,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
             ptr++;
         }
         
-        // إنشاء رمز جديد
+        // Create new token
         if (*token_count >= capacity) {
             capacity *= 2;
             Token *new_tokens = realloc(*tokens, sizeof(Token) * capacity);
@@ -109,7 +90,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
         int length = ptr - start;
         (*tokens)[*token_count].text = malloc(length + 1);
         if (!(*tokens)[*token_count].text) {
-            // تحرير الذاكرة المخصصة سابقاً
+            // Free previously allocated memory
             for (int i = 0; i < *token_count; i++) {
                 free((*tokens)[i].text);
             }
@@ -128,7 +109,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
     return 0;
 }
 
-// تهيئة المميز
+// Initialize tokenizer
 int tokenizer_init() {
     global_tokenizer.token_capacity = 1024;
     global_tokenizer.tokens = malloc(sizeof(Token) * global_tokenizer.token_capacity);
@@ -140,17 +121,23 @@ int tokenizer_init() {
     global_tokenizer.vocabulary = NULL;
     global_tokenizer.vocabulary_size = 0;
     
+    // Use log_message if available, otherwise use printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     log_message("TOKENIZER", "Tokenizer initialized");
+    #else
+    printf("[TOKENIZER] Tokenizer initialized\n");
+    #endif
+    
     return 0;
 }
 
-// تمييز نص
+// Tokenize text
 int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
     if (!text || !tokens || !token_count) {
         return -1;
     }
     
-    // تقسيم النص إلى رموز
+    // Split text into tokens
     Token *raw_tokens;
     int raw_token_count;
     
@@ -158,7 +145,7 @@ int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
         return -1;
     }
     
-    // نسخ الرموز إلى المخرجات
+    // Copy tokens to output
     *tokens = malloc(sizeof(Token *) * raw_token_count);
     if (!*tokens) {
         for (int i = 0; i < raw_token_count; i++) {
@@ -171,7 +158,7 @@ int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
     for (int i = 0; i < raw_token_count; i++) {
         (*tokens)[i] = malloc(sizeof(Token));
         if (!(*tokens)[i]) {
-            // تحرير الذاكرة المخصصة سابقاً
+            // Free previously allocated memory
             for (int j = 0; j < i; j++) {
                 free((*tokens)[j]);
             }
@@ -190,20 +177,25 @@ int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
     
     *token_count = raw_token_count;
     
-    // تحرير الذاكرة المؤقتة
+    // Free temporary memory
     for (int i = 0; i < raw_token_count; i++) {
         free(raw_tokens[i].text);
     }
     free(raw_tokens);
     
+    // Use log_message if available, otherwise use printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     char log_msg[256];
     snprintf(log_msg, sizeof(log_msg), "Tokenized text into %d tokens", *token_count);
     log_message("TOKENIZER", log_msg);
+    #else
+    printf("[TOKENIZER] Tokenized text into %d tokens\n", *token_count);
+    #endif
     
     return 0;
 }
 
-// تحويل الرموز إلى نص
+// Convert tokens back to text
 int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t output_size) {
     if (!tokens || token_count == 0 || !output || output_size == 0) {
         return -1;
@@ -211,12 +203,12 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
     
     size_t total_length = 0;
     
-    // حساب الطول الإجمالي المطلوب
+    // Calculate total required length
     for (int i = 0; i < token_count; i++) {
         if (tokens[i]) {
             total_length += strlen(tokens[i]->text);
             
-            // إضافة مسافة إذا لزم الأمر
+            // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
                 total_length++;
             }
@@ -227,13 +219,13 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
         return -1;
     }
     
-    // بناء النص
+    // Build text
     output[0] = '\0';
     for (int i = 0; i < token_count; i++) {
         if (tokens[i]) {
             strcat(output, tokens[i]->text);
             
-            // إضافة مسافة إذا لزم الأمر
+            // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
                 strcat(output, " ");
             }
@@ -243,7 +235,7 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
     return 0;
 }
 
-// تحرير ذاكرة الرموز
+// Free tokens memory
 void tokenizer_free_tokens(Token **tokens, int token_count) {
     if (!tokens || token_count == 0) {
         return;
@@ -261,7 +253,7 @@ void tokenizer_free_tokens(Token **tokens, int token_count) {
     free(tokens);
 }
 
-// تحرير ذاكرة الرمز الواحد
+// Free single token memory
 void tokenizer_free_token(Token *token) {
     if (!token) {
         return;
@@ -274,7 +266,7 @@ void tokenizer_free_token(Token *token) {
     free(token);
 }
 
-// الحصول على نوع الرمز كنص
+// Get token type as string
 const char *tokenizer_get_type_name(int type) {
     switch (type) {
         case 0: return "word";
@@ -285,7 +277,7 @@ const char *tokenizer_get_type_name(int type) {
     }
 }
 
-// تنظيف المميز
+// Clean up tokenizer
 void tokenizer_cleanup() {
     for (int i = 0; i < global_tokenizer.token_count; i++) {
         if (global_tokenizer.tokens[i].text) {
@@ -298,5 +290,10 @@ void tokenizer_cleanup() {
         free(global_tokenizer.vocabulary);
     }
     
+    // Use log_message if available, otherwise use printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     log_message("TOKENIZER", "Tokenizer cleaned up");
+    #else
+    printf("[TOKENIZER] Tokenizer cleaned up\n");
+    #endif
 }

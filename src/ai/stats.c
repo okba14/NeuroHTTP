@@ -1,41 +1,14 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
 #include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
 #include "stats.h"
-#include <string.h>
-#include <stdlib.h>
 #include "utils.h"
-#include <string.h>
-#include <stdlib.h>
 
-// تعريف بنئة إحصائيات النموذج
-typedef struct {
-    char *model_name;
-    uint64_t total_requests;
-    uint64_t successful_requests;
-    uint64_t failed_requests;
-    double avg_response_time;
-    double min_response_time;
-    double max_response_time;
-    uint64_t total_tokens_processed;
-    time_t last_used;
-} ModelStats;
-
-// تعريف بنئة جامع الإحصائيات
+// تعريف بنية جامع الإحصائيات
 typedef struct {
     ModelStats *model_stats;
     int model_count;
@@ -175,7 +148,13 @@ int stats_init(const char *stats_file, int auto_save_interval) {
     // تحميل الإحصائيات من الملف إذا كان موجوداً
     load_stats_from_file(global_stats.stats_file);
     
+    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     log_message("STATS", "Stats collector initialized");
+    #else
+    printf("[STATS] Stats collector initialized\n");
+    #endif
+    
     return 0;
 }
 
@@ -223,9 +202,14 @@ int stats_add_model(const char *model_name) {
     
     global_stats.model_count++;
     
+    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     char log_msg[256];
     snprintf(log_msg, sizeof(log_msg), "Added model to stats tracking: %s", model_name);
     log_message("STATS", log_msg);
+    #else
+    printf("[STATS] Added model to stats tracking: %s\n", model_name);
+    #endif
     
     pthread_mutex_unlock(&global_stats.mutex);
     return 0;
@@ -357,7 +341,14 @@ int stats_auto_save() {
     if (current_time - global_stats.last_save_time >= global_stats.auto_save_interval) {
         if (save_stats_to_file(global_stats.stats_file) == 0) {
             global_stats.last_save_time = current_time;
+            
+            // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+            #ifdef LOG_MESSAGE_AVAILABLE
             log_message("STATS", "Stats auto-saved to file");
+            #else
+            printf("[STATS] Stats auto-saved to file\n");
+            #endif
+            
             return 0;
         }
     }
@@ -369,7 +360,12 @@ int stats_auto_save() {
 int stats_save() {
     int result = save_stats_to_file(global_stats.stats_file);
     if (result == 0) {
+        // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+        #ifdef LOG_MESSAGE_AVAILABLE
         log_message("STATS", "Stats saved to file");
+        #else
+        printf("[STATS] Stats saved to file\n");
+        #endif
     }
     return result;
 }
@@ -392,5 +388,10 @@ void stats_cleanup() {
     pthread_mutex_unlock(&global_stats.mutex);
     pthread_mutex_destroy(&global_stats.mutex);
     
+    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    #ifdef LOG_MESSAGE_AVAILABLE
     log_message("STATS", "Stats collector cleaned up");
+    #else
+    printf("[STATS] Stats collector cleaned up\n");
+    #endif
 }

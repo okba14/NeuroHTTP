@@ -11,12 +11,13 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/epoll.h>
-#include <fcntl.h>  // Important for fcntl, F_GETFL, F_SETFL, O_NONBLOCK
+#include <fcntl.h>
 #include "server.h"
 #include "parser.h"
 #include "router.h"
 #include "stream.h"
 #include "utils.h"
+#include "asm_utils.h"
 
 // Thread data structure
 typedef struct {
@@ -288,6 +289,17 @@ int server_handle_request(Server *server, int client_fd) {
     }
     
     printf("DEBUG: Parsed request - Method: %d, Path: %s\n", request.method, request.path);
+    
+    // If the request contains JSON, use the optimized tokenizer
+    if (request.content_type && strstr(request.content_type, "application/json")) {
+        JSONValue json_result;
+        if (parse_json_with_fast_tokenizer(request.body, request.body_length, &json_result) == 0) {
+            printf("DEBUG: JSON parsed successfully using fast tokenizer\n");
+            // You can use the parsed JSON here
+            free(json_result.key);
+            free(json_result.value.str);
+        }
+    }
     
     // Route request
     RouteResponse response;

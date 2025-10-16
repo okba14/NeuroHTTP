@@ -5,9 +5,9 @@ CC = gcc
 ASM = nasm
 ASMFLAGS = -f elf64
 CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -mtune=native -flto -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -flto -lpthread -ldl -lm
+LDFLAGS = -no-pie -flto -lpthread -ldl -lm
 DEBUG_CFLAGS = -Wall -Wextra -std=c11 -g -O0 -DDEBUG -D_POSIX_C_SOURCE=200809L
-DEBUG_LDFLAGS = -lpthread -ldl -lm
+DEBUG_LDFLAGS = -no-pie -lpthread -ldl -lm
 
 # Directories
 SRC_DIR = src
@@ -75,8 +75,14 @@ dirs:
  $(BUILD_DIR)/ai/%.o: $(AI_DIR)/%.c
 	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) -I$(AI_INCLUDE_DIR) -c $< -o $@
 
-# Compile assembly files
- $(BUILD_DIR)/%.o: $(ASM_DIR)/%.s
+# Compile assembly files - specific rules for each file
+ $(BUILD_DIR)/crc32.o: $(ASM_DIR)/crc32.s
+	$(ASM) $(ASMFLAGS) $< -o $@
+
+ $(BUILD_DIR)/json_fast.o: $(ASM_DIR)/json_fast.s
+	$(ASM) $(ASMFLAGS) $< -o $@
+
+ $(BUILD_DIR)/memcpy_asm.o: $(ASM_DIR)/memcpy_asm.s
 	$(ASM) $(ASMFLAGS) $< -o $@
 
 # Compile test files

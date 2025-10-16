@@ -1,5 +1,4 @@
 #define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,8 +6,9 @@
 #include <pthread.h>
 #include "stats.h"
 #include "utils.h"
+#include "asm_utils.h"
 
-// تعريف بنية جامع الإحصائيات
+// Stats collector structure definition
 typedef struct {
     ModelStats *model_stats;
     int model_count;
@@ -21,7 +21,7 @@ typedef struct {
 
 static StatsCollector global_stats;
 
-// دالة لحفظ الإحصائيات إلى ملف
+// Function to save stats to file
 static int save_stats_to_file(const char *filename) {
     if (!filename) {
         return -1;
@@ -34,11 +34,11 @@ static int save_stats_to_file(const char *filename) {
     
     pthread_mutex_lock(&global_stats.mutex);
     
-    // كتابة رأس JSON
+    // Write JSON header
     fprintf(file, "{\n");
     fprintf(file, "  \"models\": [\n");
     
-    // كتابة إحصائيات كل نموذج
+    // Write stats for each model
     for (int i = 0; i < global_stats.model_count; i++) {
         ModelStats *stats = &global_stats.model_stats[i];
         
@@ -55,7 +55,7 @@ static int save_stats_to_file(const char *filename) {
         fprintf(file, "    }%s\n", (i < global_stats.model_count - 1) ? "," : "");
     }
     
-    // كتابة نهاية JSON
+    // Write JSON end
     fprintf(file, "  ]\n");
     fprintf(file, "}\n");
     
@@ -65,7 +65,7 @@ static int save_stats_to_file(const char *filename) {
     return 0;
 }
 
-// دالة لتحميل الإحصائيات من ملف
+// Function to load stats from file
 static int load_stats_from_file(const char *filename) {
     if (!filename) {
         return -1;
@@ -76,7 +76,7 @@ static int load_stats_from_file(const char *filename) {
         return -1;
     }
     
-    // قراءة الملف بالكامل
+    // Read entire file
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
@@ -92,19 +92,19 @@ static int load_stats_from_file(const char *filename) {
     
     fclose(file);
     
-    // تحليل JSON (تبسيط)
+    // Parse JSON (simplified)
     char *models_start = strstr(file_content, "\"models\":");
     if (!models_start) {
         free(file_content);
         return -1;
     }
     
-    // في التنفيذ الفعلي، سيتم استخدام محلل JSON حقيقي هنا
-    // للتبسيط، سنقوم بتحميل إحصائيات وهمية
+    // In actual implementation, a real JSON parser would be used here
+    // For simplicity, we'll load dummy stats
     
     pthread_mutex_lock(&global_stats.mutex);
     
-    // إضافة نموذج وهمي
+    // Add a dummy model
     if (global_stats.model_count < global_stats.model_capacity) {
         ModelStats *stats = &global_stats.model_stats[global_stats.model_count];
         stats->model_name = strdup("gpt-3.5-turbo");
@@ -126,7 +126,54 @@ static int load_stats_from_file(const char *filename) {
     return 0;
 }
 
-// تهيئة جامع الإحصائيات
+// Structure for optimized stats
+typedef struct {
+    char *key;
+    uint32_t key_hash;
+    uint64_t value;
+    time_t timestamp;
+} StatEntry;
+
+typedef struct {
+    StatEntry *entries;
+    size_t count;
+    size_t capacity;
+} Stats;
+
+// Function to update stats using optimized functions
+void stats_update_optimized(Stats *stats, const char *key, uint64_t value) {
+    // Use optimized CRC32 to compute hash of the key
+    uint32_t key_hash = crc32_asm(key, strlen(key));
+    
+    // Find or create the stat entry
+    StatEntry *entry = NULL;
+    for (size_t i = 0; i < stats->count; i++) {
+        if (stats->entries[i].key_hash == key_hash && 
+            strcmp(stats->entries[i].key, key) == 0) {
+            entry = &stats->entries[i];
+            break;
+        }
+    }
+    
+    if (!entry) {
+        // Create a new entry if we have space
+        if (stats->count >= stats->capacity) {
+            return;  // No space
+        }
+        
+        entry = &stats->entries[stats->count++];
+        entry->key = strdup(key);
+        entry->key_hash = key_hash;
+        entry->value = 0;
+        entry->timestamp = time(NULL);
+    }
+    
+    // Update the value
+    entry->value += value;
+    entry->timestamp = time(NULL);
+}
+
+// Initialize stats collector
 int stats_init(const char *stats_file, int auto_save_interval) {
     global_stats.model_capacity = 16;
     global_stats.model_stats = calloc(global_stats.model_capacity, sizeof(ModelStats));
@@ -145,10 +192,10 @@ int stats_init(const char *stats_file, int auto_save_interval) {
         return -1;
     }
     
-    // تحميل الإحصائيات من الملف إذا كان موجوداً
+    // Load stats from file if it exists
     load_stats_from_file(global_stats.stats_file);
     
-    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    // Use log_message if available, otherwise use printf
     #ifdef LOG_MESSAGE_AVAILABLE
     log_message("STATS", "Stats collector initialized");
     #else
@@ -158,7 +205,7 @@ int stats_init(const char *stats_file, int auto_save_interval) {
     return 0;
 }
 
-// إضافة نموذج لتتبع إحصائياته
+// Add a model to track its stats
 int stats_add_model(const char *model_name) {
     if (!model_name) {
         return -1;
@@ -166,15 +213,15 @@ int stats_add_model(const char *model_name) {
     
     pthread_mutex_lock(&global_stats.mutex);
     
-    // التحقق من وجود النموذج بالفعل
+    // Check if model already exists
     for (int i = 0; i < global_stats.model_count; i++) {
         if (strcmp(global_stats.model_stats[i].model_name, model_name) == 0) {
             pthread_mutex_unlock(&global_stats.mutex);
-            return 0;  // موجود بالفعل
+            return 0;  // Already exists
         }
     }
     
-    // توسيع السعة إذا لزم الأمر
+    // Expand capacity if needed
     if (global_stats.model_count >= global_stats.model_capacity) {
         int new_capacity = global_stats.model_capacity * 2;
         ModelStats *new_stats = realloc(global_stats.model_stats, 
@@ -188,7 +235,7 @@ int stats_add_model(const char *model_name) {
         global_stats.model_capacity = new_capacity;
     }
     
-    // إضافة نموذج جديد
+    // Add new model
     ModelStats *stats = &global_stats.model_stats[global_stats.model_count];
     stats->model_name = strdup(model_name);
     stats->total_requests = 0;
@@ -202,7 +249,7 @@ int stats_add_model(const char *model_name) {
     
     global_stats.model_count++;
     
-    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    // Use log_message if available, otherwise use printf
     #ifdef LOG_MESSAGE_AVAILABLE
     char log_msg[256];
     snprintf(log_msg, sizeof(log_msg), "Added model to stats tracking: %s", model_name);
@@ -215,7 +262,7 @@ int stats_add_model(const char *model_name) {
     return 0;
 }
 
-// تسجيل طلب ناجح
+// Record a successful request
 int stats_record_successful_request(const char *model_name, double response_time, int token_count) {
     if (!model_name) {
         return -1;
@@ -232,7 +279,7 @@ int stats_record_successful_request(const char *model_name, double response_time
             stats->total_tokens_processed += token_count;
             stats->last_used = time(NULL);
             
-            // تحديث متوسط وقت الاستجابة
+            // Update average response time
             if (stats->avg_response_time == 0.0) {
                 stats->avg_response_time = response_time;
                 stats->min_response_time = response_time;
@@ -260,7 +307,7 @@ int stats_record_successful_request(const char *model_name, double response_time
     return -1;
 }
 
-// تسجيل طلب فاشل
+// Record a failed request
 int stats_record_failed_request(const char *model_name) {
     if (!model_name) {
         return -1;
@@ -285,7 +332,7 @@ int stats_record_failed_request(const char *model_name) {
     return -1;
 }
 
-// الحصول على إحصائيات نموذج
+// Get stats for a model
 int stats_get_model_stats(const char *model_name, ModelStats *output) {
     if (!model_name || !output) {
         return -1;
@@ -297,7 +344,7 @@ int stats_get_model_stats(const char *model_name, ModelStats *output) {
         if (strcmp(global_stats.model_stats[i].model_name, model_name) == 0) {
             *output = global_stats.model_stats[i];
             
-            // نسخ السلاسل لتجنب مشاكل الذاكرة
+            // Copy strings to avoid memory issues
             output->model_name = strdup(global_stats.model_stats[i].model_name);
             
             pthread_mutex_unlock(&global_stats.mutex);
@@ -309,7 +356,7 @@ int stats_get_model_stats(const char *model_name, ModelStats *output) {
     return -1;
 }
 
-// الحصول على إحصائيات جميع النماذج
+// Get stats for all models
 int stats_get_all_stats(ModelStats **output, int *count) {
     if (!output || !count) {
         return -1;
@@ -334,7 +381,7 @@ int stats_get_all_stats(ModelStats **output, int *count) {
     return 0;
 }
 
-// حفظ الإحصائيات تلقائياً
+// Auto-save stats
 int stats_auto_save() {
     time_t current_time = time(NULL);
     
@@ -342,7 +389,7 @@ int stats_auto_save() {
         if (save_stats_to_file(global_stats.stats_file) == 0) {
             global_stats.last_save_time = current_time;
             
-            // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+            // Use log_message if available, otherwise use printf
             #ifdef LOG_MESSAGE_AVAILABLE
             log_message("STATS", "Stats auto-saved to file");
             #else
@@ -356,11 +403,11 @@ int stats_auto_save() {
     return -1;
 }
 
-// حفظ الإحصائيات يدوياً
+// Manually save stats
 int stats_save() {
     int result = save_stats_to_file(global_stats.stats_file);
     if (result == 0) {
-        // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+        // Use log_message if available, otherwise use printf
         #ifdef LOG_MESSAGE_AVAILABLE
         log_message("STATS", "Stats saved to file");
         #else
@@ -370,14 +417,14 @@ int stats_save() {
     return result;
 }
 
-// تنظيف جامع الإحصائيات
+// Clean up stats collector
 void stats_cleanup() {
     pthread_mutex_lock(&global_stats.mutex);
     
-    // حفظ الإحصائيات النهائية
+    // Save final stats
     save_stats_to_file(global_stats.stats_file);
     
-    // تحرير ذاكرة النماذج
+    // Free model memory
     for (int i = 0; i < global_stats.model_count; i++) {
         free(global_stats.model_stats[i].model_name);
     }
@@ -388,7 +435,7 @@ void stats_cleanup() {
     pthread_mutex_unlock(&global_stats.mutex);
     pthread_mutex_destroy(&global_stats.mutex);
     
-    // استخدام log_message إذا كانت متوفرة، وإلا استخدم printf
+    // Use log_message if available, otherwise use printf
     #ifdef LOG_MESSAGE_AVAILABLE
     log_message("STATS", "Stats collector cleaned up");
     #else

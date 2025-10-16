@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>    // ← مهم لـ isspace
+#include <ctype.h>    
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <limits.h>
 #include "utils.h"
+#include "asm_utils.h"
 
 char *read_file(const char *filename) {
     if (!filename) return NULL;
@@ -63,7 +64,7 @@ int string_to_int(const char *str, int *result) {
     *result = (int)strtol(str, &endptr, 10);
     
     if (*endptr != '\0') {
-        return -1;  // تحويل غير صالح
+        return -1;  // Invalid conversion
     }
     
     return 0;
@@ -121,7 +122,7 @@ char *str_replace(const char *orig, const char *rep, const char *with) {
     int len_rep = 0;
     int len_with = 0;
     int len_front = 0;
-    int count = 0;  // ← إصلاح: تعريف المتغير count هنا
+    int count = 0;  // Fix: Define count variable here
     
     if (!orig || !rep) return NULL;
     
@@ -132,7 +133,7 @@ char *str_replace(const char *orig, const char *rep, const char *with) {
     len_with = strlen(with);
     
     ins = (char *)orig;
-    while ((tmp = strstr(ins, rep))) {  // ← إصلاح: حساب عدد التكرارات
+    while ((tmp = strstr(ins, rep))) {  // Fix: Count occurrences
         count++;
         ins = tmp + len_rep;
     }
@@ -217,4 +218,86 @@ int str_ends_with(const char *str, const char *suffix) {
     if (suffix_len > str_len) return 0;
     
     return strncmp(str + str_len - suffix_len, suffix, suffix_len) == 0;
+}
+
+// Hardware detection functions
+int has_avx2_support(void) {
+    unsigned int eax, ebx, ecx, edx;
+    eax = 7;
+    ecx = 0;
+    __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "0"(eax), "2"(ecx));
+    return (ebx & (1 << 5)) != 0;
+}
+
+int has_avx512_support(void) {
+    unsigned int eax, ebx, ecx, edx;
+    eax = 7;
+    ecx = 0;
+    __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "0"(eax), "2"(ecx));
+    return (ebx & (1 << 16)) != 0;
+}
+
+// Optimized memcpy function
+void *fast_memcpy(void *dest, const void *src, size_t n) {
+    if (n < 1024) {
+        // For small sizes, use standard memcpy
+        return memcpy(dest, src, n);
+    }
+    
+    // Check hardware support and use optimized versions
+    if (has_avx512_support()) {
+        return memcpy_asm_avx512(dest, src, n);
+    } else if (has_avx2_support()) {
+        return memcpy_asm_avx2(dest, src, n);
+    } else {
+        return memcpy_asm(dest, src, n);
+    }
+}
+
+// Optimized CRC32 function
+uint32_t fast_crc32(const void *data, size_t length) {
+    if (has_avx2_support()) {
+        return crc32_asm_avx2(data, length);
+    } else {
+        return crc32_asm(data, length);
+    }
+}
+
+// Original functions remain for compatibility
+uint64_t get_timestamp_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
+void format_size(uint64_t bytes, char *buffer, size_t buffer_size) {
+    const char *units[] = {"B", "KB", "MB", "GB", "TB"};
+    int i = 0;
+    double size = (double)bytes;
+    
+    while (size >= 1024.0 && i < 4) {
+        size /= 1024.0;
+        i++;
+    }
+    
+    snprintf(buffer, buffer_size, "%.2f %s", size, units[i]);
+}
+
+void format_time(uint64_t ms, char *buffer, size_t buffer_size) {
+    uint64_t seconds = ms / 1000;
+    uint64_t minutes = seconds / 60;
+    uint64_t hours = minutes / 60;
+    uint64_t days = hours / 24;
+    
+    if (days > 0) {
+        snprintf(buffer, buffer_size, "%lu days, %lu hours, %lu minutes, %lu seconds", 
+                days, hours % 24, minutes % 60, seconds % 60);
+    } else if (hours > 0) {
+        snprintf(buffer, buffer_size, "%lu hours, %lu minutes, %lu seconds", 
+                hours, minutes % 60, seconds % 60);
+    } else if (minutes > 0) {
+        snprintf(buffer, buffer_size, "%lu minutes, %lu seconds", minutes, seconds % 60);
+    } else {
+        snprintf(buffer, buffer_size, "%lu seconds", seconds);
+    }
 }

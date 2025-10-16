@@ -105,6 +105,45 @@ It’s engineered to handle:
 
 ---
 
+## 🧩 Architecture Overview
+
+> **NeuroHTTP** is built around a **highly optimized, AI-native architecture** designed for extreme performance, modular extensibility, and full hardware control.  
+> Every subsystem is implemented in **C**, with critical paths written in **Assembly**, ensuring deterministic speed and low-level efficiency.
+
+---
+
+### ⚙️ Core Components
+
+| 🧱 Component | 💡 Description |
+|--------------|----------------|
+| 🧠 **AI Router** | Integrates multiple AI models *(GPT, Claude, LLaMA, etc.)* directly into the server core — enabling dynamic, intelligent request handling and adaptive routing. |
+| ⚙️ **Worker Threads** | Multi-threaded event loop designed for concurrent request processing and CPU-bound AI workloads. |
+| 🔒 **Internal Firewall** | Built-in security layer for packet inspection and filtering without external dependencies. |
+| ⚡ **Cache System (TTL-based)** | High-speed caching mechanism with configurable TTL (Time-To-Live) for optimal reuse and reduced I/O. |
+| 🔌 **Modular Plugin System** | Extensible plugin framework that allows developers to inject custom logic at runtime. |
+| 🧩 **Smart Optimizer (Runtime)** | Monitors system performance in real-time and dynamically adjusts scheduling, cache size, and routing strategies for optimal throughput. |
+
+---
+
+### 🧠 AI-Native Design
+
+Unlike traditional web servers, **NeuroHTTP** embeds intelligence at its core.  
+The integrated **AI Router** fuses multiple language models directly into the HTTP stack, enabling:
+
+- 🧭 **Context-aware routing decisions**  
+- ⚡ **Predictive request handling**  
+- 🧮 **Real-time inference & content generation**  
+- 🔁 **Adaptive optimization based on workload patterns**
+
+---
+
+> 🚀 **In short:** NeuroHTTP isn’t just a web server — it’s an AI-accelerated, self-optimizing system built for the next era of intelligent networking.
+
+
+
+---
+
+
 ## 📂 Project Structure
 The **AIONIC AI Web Server** is organized for modularity, performance, and clarity — following a clean separation between **core**, **AI**, **ASM**, and **plugin** layers.
 

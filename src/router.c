@@ -1,13 +1,14 @@
 #define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
+#include <stdbool.h>
 #include "router.h"
 #include "parser.h"
 #include "stream.h"
 #include "ai/prompt_router.h"
+#include "asm_utils.h"
 
 // Registered routes list with dynamic allocation
 static Route *routes = NULL;
@@ -171,6 +172,53 @@ int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPReque
     route_count++;
     
     return 0;
+}
+
+// Function to handle chat requests using optimized functions
+int handle_chat_request_optimized(const HTTPRequest *request, RouteResponse *response) {
+    // Extract the prompt from the request
+    const char *prompt = NULL;
+    if (request->body) {
+        // Simple parsing - in a real implementation, you would use proper JSON parsing
+        if (strstr(request->body, "\"prompt\"")) {
+            prompt = strstr(request->body, "\"prompt\"") + 9;
+            if (*prompt == '"') prompt++;
+            const char *end = strchr(prompt, '"');
+            if (end) {
+                size_t prompt_len = end - prompt;
+                char *prompt_copy = malloc(prompt_len + 1);
+                if (prompt_copy) {
+                    // Use optimized memcpy to copy the prompt
+                    memcpy_asm(prompt_copy, prompt, prompt_len);
+                    prompt_copy[prompt_len] = '\0';
+                    
+                    // Use optimized CRC32 to compute hash of the prompt
+                    uint32_t prompt_hash = crc32_asm(prompt_copy, prompt_len);
+                    
+                    // Create JSON response with hash information
+                    char *json_response = malloc(4096);
+                    if (json_response) {
+                        snprintf(json_response, 4096, 
+                                "{\"response\": \"Processed with optimized functions (hash: %u)\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
+                                prompt_hash, time(NULL));
+                        
+                        // Create HTTP response
+                        int result = create_http_response(response, json_response, strlen(json_response), 
+                                                         "application/json", 200, "OK");
+                        free(json_response);
+                        free(prompt_copy);
+                        return result;
+                    }
+                    free(prompt_copy);
+                }
+            }
+        }
+    }
+    
+    // Fallback to error response
+    const char *error_response = "{\"error\": \"Invalid request format\"}";
+    return create_http_response(response, error_response, strlen(error_response), 
+                               "application/json", 400, "Bad Request");
 }
 
 int handle_chat_request(HTTPRequest *request, RouteResponse *response) {

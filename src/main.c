@@ -15,6 +15,7 @@
 #include "ai/prompt_router.h"
 #include "ai/tokenizer.h"
 #include "ai/stats.h"
+#include "asm_utils.h"
 
 // Global variable to control server running state
 volatile sig_atomic_t running = 1;
@@ -38,6 +39,11 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, handle_signal);
     
     printf("Starting AIONIC Server...\n");
+    
+    // Display hardware acceleration support
+    printf("✅ Hardware acceleration support:\n");
+    printf("   - AVX2: %s\n", has_avx2_support() ? "Yes" : "No");
+    printf("   - AVX-512: %s\n", has_avx512_support() ? "Yes" : "No");
     
     // Load configuration
     Config config;

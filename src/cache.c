@@ -1,33 +1,19 @@
 #define _POSIX_C_SOURCE 200809L
-
-#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
 #include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
 #include "cache.h"
-#include <string.h>
-#include <stdlib.h>
 #include "utils.h"
-#include <string.h>
-#include <stdlib.h>
+#include "asm_utils.h"
 
-// تعريف بنئة التخزين المؤقت
+// Cache storage structure
 typedef struct {
     CacheEntry *entries;
     int entry_count;
     int entry_capacity;
+    int capacity; // إضافة هذا الحقل الذي كان مفقوداً
     pthread_mutex_t mutex;
     int default_ttl;
     int hits;
@@ -36,28 +22,21 @@ typedef struct {
 
 static Cache global_cache;
 
-// دالة لحساب تجزئة بسيطة
-static unsigned int simple_hash(const char *str) {
-    unsigned int hash = 5381;
-    int c;
-    
-    while ((c = *str++)) {
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-    }
-    
-    return hash;
+// Function to compute hash using optimized CRC32
+static uint32_t cache_hash(const char *key) {
+    return crc32_asm(key, strlen(key));
 }
 
-// دالة للعثور على عنصر في التخزين المؤقت
+// Function to find an entry in the cache
 static CacheEntry *find_entry(const char *key) {
     if (!key || global_cache.entry_count == 0) {
         return NULL;
     }
     
-    unsigned int hash = simple_hash(key);
+    unsigned int hash = cache_hash(key);
     int index = hash % global_cache.entry_capacity;
     
-    // البحث الخطي في حالة وجود تعارضات
+    // Linear search in case of collisions
     for (int i = 0; i < global_cache.entry_capacity; i++) {
         int current_index = (index + i) % global_cache.entry_capacity;
         
@@ -66,7 +45,7 @@ static CacheEntry *find_entry(const char *key) {
             return &global_cache.entries[current_index];
         }
         
-        // إذا وجدنا خانة فارغة، فالعنصر غير موجود
+        // If we find an empty slot, the item doesn't exist
         if (!global_cache.entries[current_index].key) {
             break;
         }
@@ -75,17 +54,17 @@ static CacheEntry *find_entry(const char *key) {
     return NULL;
 }
 
-// دالة لإضافة عنصر جديد إلى التخزين المؤقت
+// Function to add a new entry to the cache
 static CacheEntry *add_entry(const char *key, const char *value, size_t value_size, int ttl) {
-    // البحث عن خانة فارغة
-    unsigned int hash = simple_hash(key);
+    // Find an empty slot
+    unsigned int hash = cache_hash(key);
     int index = hash % global_cache.entry_capacity;
     
     for (int i = 0; i < global_cache.entry_capacity; i++) {
         int current_index = (index + i) % global_cache.entry_capacity;
         
         if (!global_cache.entries[current_index].key) {
-            // وجدنا خانة فارغة
+            // Found an empty slot
             global_cache.entries[current_index].key = strdup(key);
             global_cache.entries[current_index].value = malloc(value_size);
             if (!global_cache.entries[current_index].value) {
@@ -93,7 +72,8 @@ static CacheEntry *add_entry(const char *key, const char *value, size_t value_si
                 return NULL;
             }
             
-            memcpy(global_cache.entries[current_index].value, value, value_size);
+            // Use optimized memcpy to copy data
+            memcpy_asm(global_cache.entries[current_index].value, value, value_size);
             global_cache.entries[current_index].value_size = value_size;
             global_cache.entries[current_index].timestamp = time(NULL);
             global_cache.entries[current_index].ttl = ttl > 0 ? ttl : global_cache.default_ttl;
@@ -104,12 +84,44 @@ static CacheEntry *add_entry(const char *key, const char *value, size_t value_si
         }
     }
     
-    return NULL;  // التخزين المؤقت ممتلئ
+    return NULL;  // Cache is full
 }
 
-// تهيئة التخزين المؤقت
+// Function to put an item in the cache - تعديل هذه الدالة لتتوافق مع الهيكل الحالي
+int cache_put(Cache *cache, const char *key, const void *data, size_t size) {
+    uint32_t hash = cache_hash(key) % cache->capacity;
+    
+    // Check if we need to evict an item
+    if (cache->entries[hash].key) {
+        free(cache->entries[hash].key);
+        free(cache->entries[hash].value);
+    }
+    
+    // Allocate memory for the key
+    cache->entries[hash].key = strdup(key);
+    if (!cache->entries[hash].key) {
+        return -1;
+    }
+    
+    // Allocate memory for the data
+    cache->entries[hash].value = malloc(size);
+    if (!cache->entries[hash].value) {
+        free(cache->entries[hash].key);
+        return -1;
+    }
+    
+    // Use optimized memcpy to copy the data
+    memcpy_asm(cache->entries[hash].value, data, size);
+    cache->entries[hash].value_size = size;
+    cache->entries[hash].timestamp = time(NULL);
+    
+    return 0;
+}
+
+// Initialize the cache
 int cache_init(int size, int ttl) {
     global_cache.entry_capacity = size;
+    global_cache.capacity = size; // تهيئة الحقل الجديد
     global_cache.entries = calloc(global_cache.entry_capacity, sizeof(CacheEntry));
     if (!global_cache.entries) {
         return -1;
@@ -129,7 +141,7 @@ int cache_init(int size, int ttl) {
     return 0;
 }
 
-// تعيين قيمة في التخزين المؤقت
+// Set a value in the cache
 int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
     if (!key || !value || value_size == 0) {
         return -1;
@@ -137,7 +149,7 @@ int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
     
     pthread_mutex_lock(&global_cache.mutex);
     
-    // حذف العنصر القديم إذا كان موجوداً
+    // Delete the old item if it exists
     CacheEntry *existing_entry = find_entry(key);
     if (existing_entry) {
         free(existing_entry->key);
@@ -145,7 +157,7 @@ int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
         global_cache.entry_count--;
     }
     
-    // إضافة العنصر الجديد
+    // Add the new item
     CacheEntry *entry = add_entry(key, value, value_size, ttl);
     if (!entry) {
         pthread_mutex_unlock(&global_cache.mutex);
@@ -156,7 +168,7 @@ int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
     return 0;
 }
 
-// الحصول على قيمة من التخزين المؤقت
+// Get a value from the cache
 int cache_get(const char *key, char *value, size_t value_size) {
     if (!key || !value || value_size == 0) {
         return -1;
@@ -171,10 +183,10 @@ int cache_get(const char *key, char *value, size_t value_size) {
         return -1;
     }
     
-    // التحقق من انتهاء الصلاحية
+    // Check for expiration
     time_t current_time = time(NULL);
     if (current_time - entry->timestamp > entry->ttl) {
-        // انتهت صلاحية العنصر، حذفه
+        // Item expired, delete it
         free(entry->key);
         free(entry->value);
         entry->key = NULL;
@@ -186,9 +198,9 @@ int cache_get(const char *key, char *value, size_t value_size) {
         return -1;
     }
     
-    // نسخ القيمة
+    // Copy the value
     size_t copy_size = entry->value_size < value_size ? entry->value_size : value_size;
-    memcpy(value, entry->value, copy_size);
+    memcpy_asm(value, entry->value, copy_size);
     
     entry->access_count++;
     global_cache.hits++;
@@ -197,7 +209,7 @@ int cache_get(const char *key, char *value, size_t value_size) {
     return 0;
 }
 
-// حذف عنصر من التخزين المؤقت
+// Delete an item from the cache
 int cache_delete(const char *key) {
     if (!key) {
         return -1;
@@ -221,7 +233,7 @@ int cache_delete(const char *key) {
     return -1;
 }
 
-// مسح التخزين المؤقت
+// Clear the cache
 int cache_clear() {
     pthread_mutex_lock(&global_cache.mutex);
     
@@ -242,7 +254,7 @@ int cache_clear() {
     return 0;
 }
 
-// الحصول على إحصائيات التخزين المؤقت
+// Get cache statistics
 int cache_get_stats(int *entries, int *hits, int *misses) {
     if (!entries || !hits || !misses) {
         return -1;
@@ -258,7 +270,7 @@ int cache_get_stats(int *entries, int *hits, int *misses) {
     return 0;
 }
 
-// تنظيف التخزين المؤقت
+// Clean up the cache
 void cache_cleanup() {
     pthread_mutex_lock(&global_cache.mutex);
     

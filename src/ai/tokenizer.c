@@ -1,11 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include "tokenizer.h"
 #include "utils.h"
+#include "asm_utils.h"
 
 // Tokenizer structure definition
 typedef struct {
@@ -107,6 +108,33 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
     }
     
     return 0;
+}
+
+// Function to tokenize text using optimized functions
+int tokenize_text_optimized(const char *text, size_t length, Token *tokens, size_t max_tokens) {
+    // Use optimized memcpy for copying text
+    char *text_copy = malloc(length + 1);
+    if (!text_copy) {
+        return -1;
+    }
+    
+    memcpy_asm(text_copy, text, length);
+    text_copy[length] = '\0';
+    
+    // Simple tokenization - in a real implementation, this would be more complex
+    char *token = strtok(text_copy, " \t\n\r");
+    size_t token_count = 0;
+    
+    while (token && token_count < max_tokens) {
+        tokens[token_count].text = strdup(token);
+        // Note: We don't set length field here as it's not part of Token structure
+        token_count++;
+        
+        token = strtok(NULL, " \t\n\r");
+    }
+    
+    free(text_copy);
+    return token_count;
 }
 
 // Initialize tokenizer

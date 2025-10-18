@@ -1,35 +1,22 @@
 #define _POSIX_C_SOURCE 200809L
 
-#define _POSIX_C_SOURCE 200809L
+// ===== Standard Library Headers =====
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
-#include <string.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
-#include "config.h"
-#include <string.h>
-#include <stdlib.h>
-#include "utils.h"
-#include <string.h>
-#include <stdlib.h>
 
-// دالة لمسح المسافات البيضاء من بداية ونهاية السلسلة
+// ===== Project Headers =====
+#include "config.h"
+#include "utils.h"
+
+
 static char *trim_whitespace(char *str) {
     if (!str) return NULL;
     
     char *end;
     
-    // مسح المسافات البيضاء من البداية
     while (isspace((unsigned char)*str)) {
         str++;
     }
@@ -38,19 +25,16 @@ static char *trim_whitespace(char *str) {
         return str;
     }
     
-    // مسح المسافات البيضاء من النهاية
     end = str + strlen(str) - 1;
     while (end > str && isspace((unsigned char)*end)) {
         end--;
     }
     
-    // كتابة حرف نهاية السلسلة الجديد
     *(end + 1) = '\0';
     
     return str;
 }
 
-// دالة لتحليل سطر إعداد
 static int parse_config_line(const char *line, Config *config) {
     char *line_copy = strdup(line);
     if (!line_copy) return -1;
@@ -103,37 +87,32 @@ static int parse_config_line(const char *line, Config *config) {
     return 0;
 }
 
-// تحميل الإعدادات من ملف
 int load_config(const char *filename, Config *config) {
     if (!filename || !config) {
         return -1;
     }
     
-    // تهيئة القيم الافتراضية
     memset(config, 0, sizeof(Config));
     config->port = 8080;
     config->thread_count = 4;
     config->max_connections = 1024;
-    config->request_timeout = 30000;  // 30 ثانية
+    config->request_timeout = 30000;  
     config->buffer_size = 8192;
     config->log_file = NULL;
     config->enable_cache = 1;
     config->cache_size = 1000;
-    config->cache_ttl = 3600;  // ساعة واحدة
+    config->cache_ttl = 3600;  
     config->enable_firewall = 1;
     config->enable_optimization = 1;
     config->api_key_count = 0;
     
-    // قراءة الملف
     char *file_content = read_file(filename);
     if (!file_content) {
         return -1;
     }
     
-    // تقسيم الملف إلى أسطر
     char *line = strtok(file_content, "\n");
     while (line) {
-        // تخطي الأسطر الفارغة والتعليقات
         if (strlen(line) > 0 && line[0] != '#') {
             parse_config_line(line, config);
         }
@@ -149,7 +128,6 @@ int load_config(const char *filename, Config *config) {
     return 0;
 }
 
-// تحرير ذاكرة الإعدادات
 void free_config(Config *config) {
     if (!config) {
         return;

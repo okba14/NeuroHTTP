@@ -1,12 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+
+// ===== Project Headers =====
 #include "parser.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // Helper function to convert string to lowercase
 static void to_lower_case(char *str) {

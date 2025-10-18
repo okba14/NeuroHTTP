@@ -1,12 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
+
+// ===== Project Headers =====
 #include "stats.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // Stats collector structure definition
 typedef struct {

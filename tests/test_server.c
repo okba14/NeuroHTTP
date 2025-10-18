@@ -37,7 +37,6 @@ int test_server_basic() {
         return -1;
     }
     
-    // اختبار اتصال بسيط
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         printf("FAILED: Socket creation\n");
@@ -59,7 +58,6 @@ int test_server_basic() {
         return -1;
     }
     
-    // إرسال طلب HTTP بسيط
     const char *request = "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n";
     if (send(sock, request, strlen(request), 0) < 0) {
         printf("FAILED: Send request\n");
@@ -69,7 +67,6 @@ int test_server_basic() {
         return -1;
     }
     
-    // استقبال الاستجابة
     char response[1024];
     int bytes_received = recv(sock, response, sizeof(response) - 1, 0);
     if (bytes_received < 0) {
@@ -82,7 +79,6 @@ int test_server_basic() {
     
     response[bytes_received] = '\0';
     
-    // التحقق من الاستجابة
     if (strstr(response, "200 OK") == NULL) {
         printf("FAILED: Invalid response\n");
         close(sock);

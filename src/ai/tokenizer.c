@@ -1,12 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+
+// ===== Project Headers =====
 #include "tokenizer.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // Tokenizer structure definition
 typedef struct {

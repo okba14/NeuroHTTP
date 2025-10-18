@@ -1,28 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
 
+// ===== Standard Library Headers =====
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
 #include <time.h>
-#include <string.h>
-#include <stdlib.h>
 #include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
-#include "firewall.h"
-#include <string.h>
-#include <stdlib.h>
-#include "utils.h"
-#include <string.h>
-#include <stdlib.h>
 
-// تعريف بنئة جدار الحماية
+// ===== Project Headers =====
+#include "firewall.h"
+#include "utils.h"
+
+
 typedef struct {
     FirewallEntry *entries;
     int entry_count;
@@ -36,7 +25,6 @@ typedef struct {
 
 static Firewall global_firewall;
 
-// دالة للبحث عن إدخال في جدار الحماية
 static FirewallEntry *find_entry(const char *ip_address) {
     for (int i = 0; i < global_firewall.entry_count; i++) {
         if (strcmp(global_firewall.entries[i].ip_address, ip_address) == 0) {
@@ -46,7 +34,6 @@ static FirewallEntry *find_entry(const char *ip_address) {
     return NULL;
 }
 
-// دالة لإضافة إدخال جديد إلى جدار الحماية
 static FirewallEntry *add_entry(const char *ip_address) {
     if (global_firewall.entry_count >= global_firewall.entry_capacity) {
         int new_capacity = global_firewall.entry_capacity * 2;
@@ -70,7 +57,6 @@ static FirewallEntry *add_entry(const char *ip_address) {
     return entry;
 }
 
-// تهيئة جدار الحماية
 int firewall_init(const Config *config) {
     global_firewall.entry_capacity = 1024;
     global_firewall.entries = calloc(global_firewall.entry_capacity, sizeof(FirewallEntry));
@@ -81,15 +67,14 @@ int firewall_init(const Config *config) {
     global_firewall.entry_count = 0;
     global_firewall.allowed_api_keys = NULL;
     global_firewall.api_key_count = 0;
-    global_firewall.max_requests_per_minute = 60;  // 60 طلب في الدقيقة
-    global_firewall.block_duration_minutes = 5;   // حظر لمدة 5 دقائق
+    global_firewall.max_requests_per_minute = 60; 
+    global_firewall.block_duration_minutes = 5;   
     
     if (pthread_mutex_init(&global_firewall.mutex, NULL) != 0) {
         free(global_firewall.entries);
         return -1;
     }
     
-    // نسخ مفاتيح API المسموح بها من الإعدادات
     if (config && config->api_key_count > 0) {
         global_firewall.allowed_api_keys = malloc(sizeof(char *) * config->api_key_count);
         if (!global_firewall.allowed_api_keys) {
@@ -109,7 +94,6 @@ int firewall_init(const Config *config) {
     return 0;
 }
 
-// التحقق من طلب
 int firewall_check_request(const char *ip_address, const char *api_key) {
     if (!ip_address) {
         return -1;
@@ -126,20 +110,17 @@ int firewall_check_request(const char *ip_address, const char *api_key) {
         }
     }
     
-    // التحقق مما إذا كان IP محظوراً
     if (entry->is_blocked) {
-        // التحقق من انتهاء مدة الحظر
         time_t current_time = time(NULL);
         if (current_time - entry->last_request >= global_firewall.block_duration_minutes * 60) {
             entry->is_blocked = 0;
             entry->request_count = 0;
         } else {
             pthread_mutex_unlock(&global_firewall.mutex);
-            return -1;  // لا يزال محظوراً
+            return -1;  
         }
     }
     
-    // التحقق من مفتاح API إذا كان مطلوباً
     if (global_firewall.api_key_count > 0) {
         if (!api_key) {
             pthread_mutex_unlock(&global_firewall.mutex);
@@ -160,11 +141,9 @@ int firewall_check_request(const char *ip_address, const char *api_key) {
         }
     }
     
-    // تحديث الإحصائيات
     entry->request_count++;
     entry->last_request = time(NULL);
     
-    // التحقق من الحد الأقصى للطلبات
     if (entry->request_count > global_firewall.max_requests_per_minute) {
         entry->is_blocked = 1;
         
@@ -180,7 +159,6 @@ int firewall_check_request(const char *ip_address, const char *api_key) {
     return 0;
 }
 
-// حظر IP
 int firewall_block_ip(const char *ip_address) {
     if (!ip_address) {
         return -1;
@@ -208,7 +186,6 @@ int firewall_block_ip(const char *ip_address) {
     return 0;
 }
 
-// إلغاء حظر IP
 int firewall_unblock_ip(const char *ip_address) {
     if (!ip_address) {
         return -1;
@@ -230,11 +207,9 @@ int firewall_unblock_ip(const char *ip_address) {
     return 0;
 }
 
-// الحصول على قائمة IPs المحظورة
 int firewall_get_blocked_ips(char ***blocked_ips, int *count) {
     pthread_mutex_lock(&global_firewall.mutex);
     
-    // حساب عدد IPs المحظورة
     int blocked_count = 0;
     for (int i = 0; i < global_firewall.entry_count; i++) {
         if (global_firewall.entries[i].is_blocked) {
@@ -257,18 +232,15 @@ int firewall_get_blocked_ips(char ***blocked_ips, int *count) {
     return 0;
 }
 
-// تنظيف جدار الحماية
 void firewall_cleanup() {
     pthread_mutex_lock(&global_firewall.mutex);
     
-    // تحرير ذاكرة الإدخالات
     for (int i = 0; i < global_firewall.entry_count; i++) {
         free(global_firewall.entries[i].ip_address);
     }
     
     free(global_firewall.entries);
     
-    // تحرير ذاكرة مفاتيح API
     for (int i = 0; i < global_firewall.api_key_count; i++) {
         free(global_firewall.allowed_api_keys[i]);
     }

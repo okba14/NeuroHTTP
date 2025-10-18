@@ -18,7 +18,7 @@ typedef struct {
     CacheEntry *entries;
     int entry_count;
     int entry_capacity;
-    int capacity; // إضافة هذا الحقل الذي كان مفقوداً
+    int capacity; 
     pthread_mutex_t mutex;
     int default_ttl;
     int hits;

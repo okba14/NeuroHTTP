@@ -1,6 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
+
 #define MAX_EVENTS 1024   // Maximum number of events in epoll_wait
 #define BACKLOG 128       // Number of pending connections before accept
-#define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,12 +15,15 @@
 #include <pthread.h>
 #include <sys/epoll.h>
 #include <fcntl.h>
+
+// ===== Project Headers =====
 #include "server.h"
 #include "parser.h"
 #include "router.h"
 #include "stream.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // Thread data structure
 typedef struct {

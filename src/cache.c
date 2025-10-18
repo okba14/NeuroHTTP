@@ -1,12 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
-#include "cache.h"
+
+// ===== Project Headers =====
 #include "utils.h"
+#include "cache.h"
 #include "asm_utils.h"
+
 
 // Cache storage structure
 typedef struct {

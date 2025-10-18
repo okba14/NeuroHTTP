@@ -1,17 +1,21 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
-#include <sys/resource.h>
 #include <unistd.h>
 #include <sys/time.h>
-#include "optimizer.h"
+#include <sys/resource.h>
+
+// ===== Project Headers =====
 #include "utils.h"
 #include "cache.h"
+#include "optimizer.h"
 
-// تعريف بنئة المحسن
+
 typedef struct {
     PerformanceData *history;
     int history_size;
@@ -27,7 +31,6 @@ typedef struct {
 
 static Optimizer global_optimizer;
 
-// دالة للحصول على استخدام CPU
 static double get_cpu_usage() {
     FILE *fp = fopen("/proc/stat", "r");
     if (!fp) return 0.0;
@@ -52,7 +55,6 @@ static double get_cpu_usage() {
     return (double)(diff_user + diff_system) * 100.0 / total;
 }
 
-// دالة للحصول على استخدام الذاكرة
 static double get_memory_usage() {
     struct rusage usage;
     getrusage(RUSAGE_SELF, &usage);
@@ -60,23 +62,19 @@ static double get_memory_usage() {
     long page_size = sysconf(_SC_PAGESIZE);
     long resident_set = usage.ru_maxrss;
     
-    // تحويل إلى ميغابايت
     return (double)resident_set * page_size / (1024 * 1024);
 }
 
-// دالة لجمع بيانات الأداء
 static void collect_performance_data(PerformanceData *data) {
     data->timestamp = time(NULL);
     data->cpu_usage = get_cpu_usage();
     data->memory_usage = get_memory_usage();
-    // سيتم ملء الحقول الأخرى لاحقاً من الخادم
     data->requests_per_second = 0;
     data->avg_response_time = 0;
     data->active_connections = 0;
     data->thread_pool_utilization = 0;
 }
 
-// دالة لتحليل بيانات الأداء وتحديد ما إذا كان التحسين مطلوباً
 static int needs_optimization(const PerformanceData *data) {
     if (data->cpu_usage > global_optimizer.cpu_threshold) {
         return 1;
@@ -93,15 +91,12 @@ static int needs_optimization(const PerformanceData *data) {
     return 0;
 }
 
-// دالة لتحسين استخدام الذاكرة
 static void optimize_memory() {
     log_message("OPTIMIZER", "Optimizing memory usage...");
     
-    // تنظيف التخزين المؤقت
     extern int cache_clear(void);
     cache_clear();
     
-    // إجبار جمع القمامة إذا كان ممكناً
     #ifdef __GLIBC__
     extern int malloc_trim(size_t);
     malloc_trim(0);
@@ -110,16 +105,13 @@ static void optimize_memory() {
     log_message("OPTIMIZER", "Memory optimization completed");
 }
 
-// دالة لتحسين استخدام CPU
 static void optimize_cpu() {
     log_message("OPTIMIZER", "Optimizing CPU usage...");
     
-    // تقليل أولوية العملية
     #ifdef _GNU_SOURCE
     nice(1);
     #endif
     
-    // تنظيف الموارد غير المستخدمة
     #ifdef __GLIBC__
     extern int malloc_trim(size_t);
     malloc_trim(0);
@@ -128,17 +120,13 @@ static void optimize_cpu() {
     log_message("OPTIMIZER", "CPU optimization completed");
 }
 
-// دالة لتحسين وقت الاستجابة
 static void optimize_response_time() {
     log_message("OPTIMIZER", "Optimizing response time...");
     
-    // زيادة حجم المخزن المؤقت
-    // سيتم تنفيذ هذا لاحقاً
     
     log_message("OPTIMIZER", "Response time optimization completed");
 }
 
-// تهيئة المحسن
 int optimizer_init(const Config *config) {
     if (!config) {
         return -1;
@@ -167,7 +155,6 @@ int optimizer_init(const Config *config) {
     return 0;
 }
 
-// تشغيل دورة التحسين
 int optimizer_run(Server *server) {
     if (!global_optimizer.enable_auto_optimization) {
         return 0;
@@ -177,51 +164,42 @@ int optimizer_run(Server *server) {
     
     pthread_mutex_lock(&global_optimizer.mutex);
     
-    // جمع بيانات الأداء الحالية
     PerformanceData current_data;
     collect_performance_data(&current_data);
     
-    // تحديث بيانات الخادم
     if (server) {
         current_data.active_connections = server->active_connections;
         current_data.requests_per_second = server->stats.total_requests / 
                                           (current_time - global_optimizer.last_optimization_time + 1);
         current_data.avg_response_time = server->stats.avg_response_time;
         
-        // حساب استخدام مجمع مؤشرات الترابط
         if (server->thread_count > 0) {
             current_data.thread_pool_utilization = 
                 (server->active_connections * 100) / server->thread_count;
         }
     }
     
-    // إضافة البيانات إلى التاريخ
     if (global_optimizer.history_size < global_optimizer.history_capacity) {
         global_optimizer.history[global_optimizer.history_size++] = current_data;
     } else {
-        // تحريك البيانات لإفساح مجال للبيانات الجديدة
         memmove(&global_optimizer.history[0], &global_optimizer.history[1], 
                 sizeof(PerformanceData) * (global_optimizer.history_capacity - 1));
         global_optimizer.history[global_optimizer.history_capacity - 1] = current_data;
     }
     
-    // التحقق من الحاجة إلى التحسين
     if (current_time - global_optimizer.last_optimization_time >= global_optimizer.optimization_interval &&
         needs_optimization(&current_data)) {
         
         log_message("OPTIMIZER", "Performance degradation detected, starting optimization...");
         
-        // تحسين الذاكرة إذا كان الاستخدام عالياً
         if (current_data.memory_usage > global_optimizer.memory_threshold) {
             optimize_memory();
         }
         
-        // تحسين CPU إذا كان الاستخدام عالياً
         if (current_data.cpu_usage > global_optimizer.cpu_threshold) {
             optimize_cpu();
         }
         
-        // تحسين وقت الاستجابة إذا كان عالياً
         if (current_data.avg_response_time > global_optimizer.response_time_threshold) {
             optimize_response_time();
         }
@@ -234,7 +212,6 @@ int optimizer_run(Server *server) {
     return 0;
 }
 
-// الحصول على بيانات الأداء الحالية
 int optimizer_get_current_data(PerformanceData *data) {
     if (!data) {
         return -1;
@@ -252,7 +229,6 @@ int optimizer_get_current_data(PerformanceData *data) {
     return -1;
 }
 
-// الحصول على متوسط بيانات الأداء
 int optimizer_get_average_data(PerformanceData *data) {
     if (!data || global_optimizer.history_size == 0) {
         return -1;
@@ -281,7 +257,6 @@ int optimizer_get_average_data(PerformanceData *data) {
     return 0;
 }
 
-// تعيين عتبات التحسين
 int optimizer_set_thresholds(double cpu_threshold, double memory_threshold, double response_time_threshold) {
     pthread_mutex_lock(&global_optimizer.mutex);
     
@@ -293,7 +268,6 @@ int optimizer_set_thresholds(double cpu_threshold, double memory_threshold, doub
     return 0;
 }
 
-// تمكين أو تعطيل التحسين التلقائي
 int optimizer_set_auto_optimization(int enable) {
     pthread_mutex_lock(&global_optimizer.mutex);
     
@@ -303,7 +277,6 @@ int optimizer_set_auto_optimization(int enable) {
     return 0;
 }
 
-// تنظيف المحسن
 void optimizer_cleanup() {
     pthread_mutex_lock(&global_optimizer.mutex);
     

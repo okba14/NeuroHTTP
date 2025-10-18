@@ -1,31 +1,18 @@
 #define _POSIX_C_SOURCE 200809L
 
+// ====== Standard Library Headers ======
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdlib.h>
-#include <string.h>
-#include <string.h>
-#include <stdlib.h>
-#include <dlfcn.h>
-#include <string.h>
-#include <stdlib.h>
-#include <dirent.h>
-#include <string.h>
-#include <stdlib.h>
 #include <pthread.h>
-#include <string.h>
-#include <stdlib.h>
-#include "plugin.h"
-#include <string.h>
-#include <stdlib.h>
-#include "utils.h"
-#include <string.h>
-#include <stdlib.h>
+#include <dlfcn.h>
+#include <dirent.h>
 
-// تعريف بنئة الموديول
+// ====== Project Headers ======
+#include "plugin.h"
+#include "utils.h"
+
+
 typedef struct {
     char *name;
     char *path;
@@ -37,7 +24,6 @@ typedef struct {
     int is_enabled;
 } Plugin;
 
-// تعريف بنئة مدير الموديولات
 typedef struct {
     Plugin *plugins;
     int plugin_count;
@@ -48,7 +34,6 @@ typedef struct {
 
 static PluginManager global_plugin_manager;
 
-// دالة لتحميل موديول واحد
 static int load_plugin(const char *plugin_path) {
     void *handle = dlopen(plugin_path, RTLD_LAZY);
     if (!handle) {
@@ -56,7 +41,6 @@ static int load_plugin(const char *plugin_path) {
         return -1;
     }
     
-    // استخراج الرموز المطلوبة
     int (*init)(void) = dlsym(handle, "plugin_init");
     int (*process)(void *, void *) = dlsym(handle, "plugin_process");
     void (*cleanup)(void) = dlsym(handle, "plugin_cleanup");
@@ -67,11 +51,9 @@ static int load_plugin(const char *plugin_path) {
         return -1;
     }
     
-    // إضافة الموديول إلى القائمة
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
     if (global_plugin_manager.plugin_count >= global_plugin_manager.plugin_capacity) {
-        // توسيع سعة الموديولات
         int new_capacity = global_plugin_manager.plugin_capacity * 2;
         Plugin *new_plugins = realloc(global_plugin_manager.plugins, 
                                      sizeof(Plugin) * new_capacity);
@@ -85,17 +67,14 @@ static int load_plugin(const char *plugin_path) {
         global_plugin_manager.plugin_capacity = new_capacity;
     }
     
-    // استخراج اسم الموديول من المسار
     const char *filename = strrchr(plugin_path, '/');
     if (!filename) filename = plugin_path;
     else filename++;
     
-    // إزالة الامتداد
     char *name = strdup(filename);
     char *dot = strrchr(name, '.');
     if (dot) *dot = '\0';
     
-    // تهيئة بنية الموديول
     Plugin *plugin = &global_plugin_manager.plugins[global_plugin_manager.plugin_count];
     plugin->name = name;
     plugin->path = strdup(plugin_path);
@@ -106,7 +85,6 @@ static int load_plugin(const char *plugin_path) {
     plugin->is_loaded = 1;
     plugin->is_enabled = 1;
     
-    // استدعاء دالة التهيئة
     if (plugin->init() != 0) {
         log_message("PLUGIN", "Plugin initialization failed");
         dlclose(handle);
@@ -126,7 +104,6 @@ static int load_plugin(const char *plugin_path) {
     return 0;
 }
 
-// دالة لتحميل جميع الموديولات من دليل
 static int load_plugins_from_directory(const char *dir_path) {
     DIR *dir;
     struct dirent *entry;
@@ -142,12 +119,10 @@ static int load_plugins_from_directory(const char *dir_path) {
     int loaded_count = 0;
     
     while ((entry = readdir(dir)) != NULL) {
-        // تخطي الدلائل الحالية والوالدة
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
         
-        // التحقق من أن الملف هو مكتبة مشتركة (.so)
         size_t len = strlen(entry->d_name);
         if (len > 3 && strcmp(entry->d_name + len - 3, ".so") == 0) {
             char plugin_path[1024];
@@ -168,7 +143,6 @@ static int load_plugins_from_directory(const char *dir_path) {
     return loaded_count;
 }
 
-// تهيئة مدير الموديولات
 int plugin_init(const char *plugin_dir) {
     global_plugin_manager.plugin_capacity = 16;
     global_plugin_manager.plugins = calloc(global_plugin_manager.plugin_capacity, sizeof(Plugin));
@@ -185,19 +159,16 @@ int plugin_init(const char *plugin_dir) {
         return -1;
     }
     
-    // تحميل الموديولات من الدليل
     load_plugins_from_directory(global_plugin_manager.plugin_dir);
     
     log_message("PLUGIN", "Plugin manager initialized");
     return 0;
 }
 
-// تحميل موديول معين
 int plugin_load(const char *plugin_path) {
     return load_plugin(plugin_path);
 }
 
-// تفريغ موديول معين
 int plugin_unload(const char *plugin_name) {
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
@@ -206,17 +177,13 @@ int plugin_unload(const char *plugin_name) {
             Plugin *plugin = &global_plugin_manager.plugins[i];
             
             if (plugin->is_loaded) {
-                // استدعاء دالة التنظيف
                 plugin->cleanup();
                 
-                // إغلاق المكتبة
                 dlclose(plugin->handle);
                 
-                // تحرير الموارد
                 free(plugin->name);
                 free(plugin->path);
                 
-                // إزالة الموديول من القائمة
                 for (int j = i; j < global_plugin_manager.plugin_count - 1; j++) {
                     global_plugin_manager.plugins[j] = global_plugin_manager.plugins[j + 1];
                 }
@@ -239,7 +206,6 @@ int plugin_unload(const char *plugin_name) {
     return -1;
 }
 
-// تمكين أو تعطيل موديول
 int plugin_set_enabled(const char *plugin_name, int enabled) {
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
@@ -261,7 +227,6 @@ int plugin_set_enabled(const char *plugin_name, int enabled) {
     return -1;
 }
 
-// معالجة طلب عبر جميع الموديولات الممكنة
 int plugin_process_request(void *request, void *response) {
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
@@ -280,7 +245,6 @@ int plugin_process_request(void *request, void *response) {
                         plugin->name, plugin_result);
                 log_message("PLUGIN", log_msg);
                 
-                // يمكننا الاستمرار مع الموديولات الأخرى أو التوقف هنا
                 // break;
             }
         }
@@ -290,7 +254,6 @@ int plugin_process_request(void *request, void *response) {
     return result;
 }
 
-// الحصول على قائمة الموديولات المحملة
 int plugin_get_list(char ***plugin_names, int *count) {
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
@@ -305,11 +268,9 @@ int plugin_get_list(char ***plugin_names, int *count) {
     return 0;
 }
 
-// تنظيف مدير الموديولات
 void plugin_cleanup() {
     pthread_mutex_lock(&global_plugin_manager.mutex);
     
-    // تفريغ جميع الموديولات
     for (int i = global_plugin_manager.plugin_count - 1; i >= 0; i--) {
         Plugin *plugin = &global_plugin_manager.plugins[i];
         

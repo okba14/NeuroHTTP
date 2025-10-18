@@ -1,12 +1,17 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+
+// ===== Project Headers =====
 #include "prompt_router.h"
 #include "parser.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // AI model structure definition
 typedef struct {

@@ -1,14 +1,19 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
+
+// ===== Project Headers =====
 #include "router.h"
 #include "parser.h"
 #include "stream.h"
 #include "ai/prompt_router.h"
 #include "asm_utils.h"
+
 
 // Registered routes list with dynamic allocation
 static Route *routes = NULL;

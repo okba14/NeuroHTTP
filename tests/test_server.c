@@ -1,12 +1,20 @@
+#define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+// ===== System Headers =====
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+// ===== Project Headers =====
 #include "../include/server.h"
 #include "../include/config.h"
+
 
 int test_server_basic() {
     printf("Testing server basic functionality...\n");

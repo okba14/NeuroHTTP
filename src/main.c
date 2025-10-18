@@ -1,21 +1,30 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <time.h>  // Important for nanosleep
-#include "server.h"
+#include <time.h>  // for nanosleep
+
+// ===== Project Headers =====
 #include "config.h"
+#include "server.h"
 #include "parser.h"
 #include "firewall.h"
 #include "optimizer.h"
 #include "cache.h"
 #include "plugin.h"
+
+// ===== AI Modules =====
 #include "ai/prompt_router.h"
 #include "ai/tokenizer.h"
 #include "ai/stats.h"
+
+// ===== Low-level Utils =====
 #include "asm_utils.h"
+
 
 // Global variable to control server running state
 volatile sig_atomic_t running = 1;

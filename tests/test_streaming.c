@@ -1,28 +1,34 @@
+#define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+// ===== System Headers =====
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
+// ===== Project Headers =====
 #include "../include/server.h"
 #include "../include/config.h"
 #include "../include/stream.h"
 
+
 int test_streaming_response() {
     printf("Testing streaming response...\n");
     
-    // إنشاء مقبس اختبار
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock < 0) {
         printf("FAILED: Socket creation\n");
         return -1;
     }
     
-    // ربط المقبس بمنفذ مؤقت
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = 0;  // اختيار منفذ تلقائي
+    server_addr.sin_port = 0;  
     server_addr.sin_addr.s_addr = INADDR_ANY;
     
     if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
@@ -31,7 +37,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // الحصول على المنفذ الفعلي
     socklen_t len = sizeof(server_addr);
     if (getsockname(server_sock, (struct sockaddr *)&server_addr, &len) < 0) {
         printf("FAILED: Get socket name\n");
@@ -41,14 +46,12 @@ int test_streaming_response() {
     
     int port = ntohs(server_addr.sin_port);
     
-    // بدء الاستماع
     if (listen(server_sock, 1) < 0) {
         printf("FAILED: Listen\n");
         close(server_sock);
         return -1;
     }
     
-    // إنشاء عميل اختبار
     int client_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (client_sock < 0) {
         printf("FAILED: Client socket creation\n");
@@ -56,7 +59,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // الاتصال بالخادم
     struct sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(port);
@@ -69,7 +71,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // قبول الاتصال من الخادم
     int accepted_sock = accept(server_sock, (struct sockaddr *)&server_addr, &len);
     if (accepted_sock < 0) {
         printf("FAILED: Accept connection\n");
@@ -78,7 +79,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // اختبار التدفق
     StreamData stream;
     if (stream_init(&stream, accepted_sock) != 0) {
         printf("FAILED: Stream initialization\n");
@@ -88,7 +88,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // إرسال أجزاء البيانات
     const char *chunks[] = {"Hello, ", "streaming ", "world!"};
     for (int i = 0; i < sizeof(chunks)/sizeof(chunks[0]); i++) {
         if (stream_send_chunk(&stream, chunks[i], strlen(chunks[i])) != 0) {
@@ -101,7 +100,6 @@ int test_streaming_response() {
         }
     }
     
-    // إنهاء التدفق
     if (stream_end(&stream) != 0) {
         printf("FAILED: Stream end\n");
         stream_cleanup(&stream);
@@ -111,7 +109,6 @@ int test_streaming_response() {
         return -1;
     }
     
-    // استقبال البيانات من العميل
     char response[1024];
     int bytes_received = recv(client_sock, response, sizeof(response) - 1, 0);
     if (bytes_received < 0) {
@@ -125,7 +122,6 @@ int test_streaming_response() {
     
     response[bytes_received] = '\0';
     
-    // التحقق من الاستجابة
     if (strstr(response, "200 OK") == NULL) {
         printf("FAILED: Invalid response\n");
         stream_cleanup(&stream);

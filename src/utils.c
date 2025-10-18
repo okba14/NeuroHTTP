@@ -1,16 +1,21 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>    
+#include <ctype.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <limits.h>
+
+// ===== Project Headers =====
 #include "utils.h"
 #include "asm_utils.h"
+
 
 char *read_file(const char *filename) {
     if (!filename) return NULL;

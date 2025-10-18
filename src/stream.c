@@ -1,14 +1,19 @@
 #define _POSIX_C_SOURCE 200809L
+
+// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <time.h>  // Important for nanosleep
-#include <sys/socket.h>  // Important for send
+#include <time.h>       // For nanosleep
+#include <sys/socket.h> // For send()
+
+// ===== Project Headers =====
 #include "stream.h"
 #include "parser.h"
 #include "utils.h"
 #include "asm_utils.h"
+
 
 // Initialize stream data
 int stream_init(StreamData *stream, int client_fd) {

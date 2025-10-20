@@ -15,6 +15,9 @@
 #include <limits.h>  // For PATH_MAX
 #include <netinet/in.h>  // For INET6_ADDRSTRLEN
 #include <arpa/inet.h>  // For inet_ntop
+#include <sys/stat.h>   // For stat() instead of access()
+#include <fcntl.h>      // For open() and related flags
+#include <errno.h>      // For errno
 
 // ===== Project Headers =====
 #include "config.h"
@@ -142,7 +145,8 @@ volatile sig_atomic_t running = 1;
 static void handle_signal(int sig);
 static void print_version_info(void);
 static void logger_init(Logger *logger, LogLevel level, FILE *output, int use_colors);
-static void logger_log(Logger *logger, LogLevel level, const char *format, ...);
+static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
+    __attribute__((format(printf, 3, 4)));
 static void handle_error(AionicError error);
 static int initialize_components(AionicSystem *system);
 static void cleanup_components(AionicSystem *system);
@@ -156,6 +160,7 @@ static int load_hierarchical_config(const char *base_path, Config *config);
 static int setup_inotify(AionicSystem *system, const char *config_path);
 static void check_config_reload(AionicSystem *system);
 static void recover_from_error(AionicError error, AionicSystem *system);
+static int safe_file_exists(const char *path);
 
 /**
  * @brief Signal handler for graceful shutdown
@@ -201,7 +206,7 @@ static void logger_init(Logger *logger, LogLevel level, FILE *output, int use_co
  * 
  * @param logger Pointer to the logger structure
  * @param level Log level
- * @param format Format string
+ * @param format Format string (must be a literal string)
  * @param ... Variable arguments
  */
 static void logger_log(Logger *logger, LogLevel level, const char *format, ...) {
@@ -236,14 +241,23 @@ static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
     char time_buffer[26];
     strftime(time_buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
     
-    fprintf(logger->output, "%s [%s] %s%s: ", time_buffer, level_str, color_start, color_end);
+    // Use fputs for constant strings to avoid format string issues
+    fputs(time_buffer, logger->output);
+    fputs(" [", logger->output);
+    fputs(level_str, logger->output);
+    fputs("] ", logger->output);
+    fputs(color_start, logger->output);
+    fputs(color_end, logger->output);
+    fputs(": ", logger->output);
     
     va_list args;
     va_start(args, format);
+    // Use vfprintf with a constant format string to prevent format string vulnerabilities
     vfprintf(logger->output, format, args);
     va_end(args);
     
-    fprintf(logger->output, "%s\n", color_end);
+    fputs(color_end, logger->output);
+    fputs("\n", logger->output);
     fflush(logger->output);
 }
 
@@ -271,8 +285,18 @@ static void handle_error(AionicError error) {
         default: error_str = "Unknown Error"; break;
     }
     
-    fprintf(stderr, "❌ %s: %s\n", error_str, error.message);
-    fprintf(stderr, "   at %s:%d in %s()\n", error.file, error.line, error.function);
+    // Use fputs for constant strings to avoid format string issues
+    fputs("❌ ", stderr);
+    fputs(error_str, stderr);
+    fputs(": ", stderr);
+    fputs(error.message, stderr);
+    fputs("\n   at ", stderr);
+    fputs(error.file, stderr);
+    fputs(":", stderr);
+    fprintf(stderr, "%d", error.line);
+    fputs(" in ", stderr);
+    fputs(error.function, stderr);
+    fputs("()\n", stderr);
 }
 
 /**
@@ -555,6 +579,23 @@ static void config_paths_cleanup(ConfigPaths *paths) {
 }
 
 /**
+ * @brief Safely check if a file exists
+ * 
+ * This function avoids the TOCTOU (Time-of-Check to Time-of-Use) vulnerability
+ * by not using access() and instead using stat().
+ * 
+ * @param path Path to the file
+ * @return 1 if file exists, 0 if it doesn't, -1 on error
+ */
+static int safe_file_exists(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return S_ISREG(st.st_mode) ? 1 : 0;
+    }
+    return 0;
+}
+
+/**
  * @brief Load hierarchical configuration files
  * 
  * @param base_path Base configuration directory path
@@ -566,7 +607,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
     
     // Try to load base configuration first
     snprintf(path, sizeof(path), "%s/base.conf", base_path);
-    if (access(path, F_OK) != -1) {
+    if (safe_file_exists(path)) {
         if (load_config(path, config) != 0) {
             handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load base configuration"));
             return -1;
@@ -584,7 +625,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
     const char *env = getenv("AIONIC_ENV");
     if (env) {
         snprintf(path, sizeof(path), "%s/%s.conf", base_path, env);
-        if (access(path, F_OK) != -1 && load_config(path, config) != 0) {
+        if (safe_file_exists(path) && load_config(path, config) != 0) {
             handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, 
                                             "Failed to load environment configuration"));
             return -1;
@@ -593,7 +634,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
     
     // Load local configuration if it exists
     snprintf(path, sizeof(path), "%s/local.conf", base_path);
-    if (access(path, F_OK) != -1) {
+    if (safe_file_exists(path)) {
         if (load_config(path, config) != 0) {
             handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load local configuration"));
             return -1;

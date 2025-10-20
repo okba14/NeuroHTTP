@@ -12,7 +12,6 @@
 #include "utils.h"
 #include "asm_utils.h"
 
-
 // Tokenizer structure definition
 typedef struct {
     Token *tokens;
@@ -104,8 +103,9 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
             return -1;
         }
         
+        // Secure copy with explicit null termination
         strncpy((*tokens)[*token_count].text, start, length);
-        (*tokens)[*token_count].text[length] = '\0';
+        (*tokens)[*token_count].text[length] = '\0'; // Ensure null-termination
         (*tokens)[*token_count].id = *token_count;
         (*tokens)[*token_count].type = type;
         
@@ -131,8 +131,16 @@ int tokenize_text_optimized(const char *text, size_t length, Token *tokens, size
     size_t token_count = 0;
     
     while (token && token_count < max_tokens) {
+        // Secure token duplication
         tokens[token_count].text = strdup(token);
-        // Note: We don't set length field here as it's not part of Token structure
+        if (!tokens[token_count].text) {
+            // Clean up already allocated tokens
+            for (size_t i = 0; i < token_count; i++) {
+                free(tokens[i].text);
+            }
+            free(text_copy);
+            return -1;
+        }
         token_count++;
         
         token = strtok(NULL, " \t\n\r");
@@ -204,6 +212,19 @@ int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
         }
         
         (*tokens)[i]->text = strdup(raw_tokens[i].text);
+        if (!(*tokens)[i]->text) {
+            // Clean up on allocation failure
+            for (int j = 0; j < i; j++) {
+                free((*tokens)[j]->text);
+                free((*tokens)[j]);
+            }
+            free(*tokens);
+            for (int j = 0; j < raw_token_count; j++) {
+                free(raw_tokens[j].text);
+            }
+            free(raw_tokens);
+            return -1;
+        }
         (*tokens)[i]->id = raw_tokens[i].id;
         (*tokens)[i]->type = raw_tokens[i].type;
     }
@@ -239,10 +260,17 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
     // Calculate total required length
     for (int i = 0; i < token_count; i++) {
         if (tokens[i]) {
-            total_length += strlen(tokens[i]->text);
+            size_t token_len = strlen(tokens[i]->text);
+            if (token_len > SIZE_MAX - total_length) {
+                return -1; // Prevent integer overflow
+            }
+            total_length += token_len;
             
             // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
+                if (total_length >= SIZE_MAX - 1) {
+                    return -1; // Prevent integer overflow
+                }
                 total_length++;
             }
         }
@@ -252,15 +280,30 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
         return -1;
     }
     
-    // Build text
+    // Build text securely
     output[0] = '\0';
+    size_t current_len = 0;
+    
     for (int i = 0; i < token_count; i++) {
         if (tokens[i]) {
-            strcat(output, tokens[i]->text);
+            size_t token_len = strlen(tokens[i]->text);
+            size_t remaining = output_size - current_len - 1; // Space for null terminator
+            
+            if (token_len >= remaining) {
+                return -1; // Not enough space
+            }
+            
+            // Safe concatenation
+            strncat(output, tokens[i]->text, remaining);
+            current_len += token_len;
             
             // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
-                strcat(output, " ");
+                if (current_len >= output_size - 1) {
+                    return -1; // Not enough space
+                }
+                strncat(output, " ", output_size - current_len - 1);
+                current_len++;
             }
         }
     }

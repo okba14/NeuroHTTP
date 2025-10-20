@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 // ===== Project Headers =====
 #include "router.h"
@@ -14,49 +15,197 @@
 #include "ai/prompt_router.h"
 #include "asm_utils.h"
 
+// ===== Constants =====
+#define MAX_CACHED_RESPONSES 16
+#define MAX_MIDDLEWARE 8
+#define MAX_ROUTE_PARAMS 8
 
-// Registered routes list with dynamic allocation
-static Route *routes = NULL;
-static int route_count = 0;
-static int route_capacity = 0;
+// ===== Global Variables =====
+static RouteHashTable routes_table = {0};  // Hash table for routes
+
+// Cached responses for common paths
+static RouteResponse cached_404_response = {0};
+static RouteResponse cached_root_response = {0};
+
+// Middleware functions
+static MiddlewareFunc middlewares[MAX_MIDDLEWARE] = {NULL};
+static int middleware_count = 0;
+
+// Error messages
+static const char* route_error_messages[] = {
+    "No error",
+    "Memory allocation failed",
+    "Invalid parameter",
+    "Route not found",
+    "Internal server error"
+};
+
+// ===== Helper Functions =====
 
 // Helper function to check if a method matches
 static int method_matches(HTTPMethod method1, HTTPMethod method2) {
     return method1 == method2;
 }
 
-// Helper function to create a complete HTTP response
+// Check if a route path matches a request path with parameters
+static int route_matches_with_params(const char *route_path, const char *request_path) {
+    char route_copy[256];
+    char request_copy[256];
+    
+    strncpy(route_copy, route_path, sizeof(route_copy) - 1);
+    strncpy(request_copy, request_path, sizeof(request_copy) - 1);
+    
+    char *route_token = strtok(route_copy, "/");
+    char *request_token = strtok(request_copy, "/");
+    
+    while (route_token != NULL && request_token != NULL) {
+        if (route_token[0] != ':' && strcmp(route_token, request_token) != 0) {
+            return 0;  // No match
+        }
+        
+        route_token = strtok(NULL, "/");
+        request_token = strtok(NULL, "/");
+    }
+    
+    // Both should reach the end
+    return route_token == NULL && request_token == NULL;
+}
+
+// ===== Hash Table Functions =====
+
+// Simple hash function for strings (djb2 algorithm)
+static unsigned int hash_string(const char *str) {
+    unsigned long hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+    }
+    return hash % HASH_TABLE_SIZE;
+}
+
+// Initialize the hash table
+static void hash_table_init(RouteHashTable *table) {
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        table->buckets[i] = NULL;
+    }
+    pthread_rwlock_init(&table->lock, NULL);
+}
+
+// Add a route to the hash table
+static int hash_table_add(RouteHashTable *table, Route *route) {
+    unsigned int index = hash_string(route->path);
+    
+    pthread_rwlock_wrlock(&table->lock);
+    
+    // Add to the beginning of the bucket
+    route->next = table->buckets[index];
+    table->buckets[index] = route;
+    
+    pthread_rwlock_unlock(&table->lock);
+    
+    return 0;
+}
+
+// Find a route in the hash table
+static Route *hash_table_find(RouteHashTable *table, const char *path, HTTPMethod method) {
+    unsigned int index = hash_string(path);
+    
+    pthread_rwlock_rdlock(&table->lock);
+    
+    Route *current = table->buckets[index];
+    while (current != NULL) {
+        if (strcmp(current->path, path) == 0 && method_matches(current->method, method)) {
+            pthread_rwlock_unlock(&table->lock);
+            return current;
+        }
+        current = current->next;
+    }
+    
+    pthread_rwlock_unlock(&table->lock);
+    return NULL;
+}
+
+// Find a route with parameters in the hash table
+static Route *hash_table_find_with_params(RouteHashTable *table, const char *path, HTTPMethod method) {
+    // We need to check all routes for parameter matching
+    pthread_rwlock_rdlock(&table->lock);
+    
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        Route *current = table->buckets[i];
+        while (current != NULL) {
+            if (method_matches(current->method, method) && route_matches_with_params(current->path, path)) {
+                pthread_rwlock_unlock(&table->lock);
+                return current;
+            }
+            current = current->next;
+        }
+    }
+    
+    pthread_rwlock_unlock(&table->lock);
+    return NULL;
+}
+
+// Free all routes in the hash table
+static void hash_table_free(RouteHashTable *table) {
+    pthread_rwlock_wrlock(&table->lock);
+    
+    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
+        Route *current = table->buckets[i];
+        while (current != NULL) {
+            Route *next = current->next;
+            free(current->path);
+            free(current);
+            current = next;
+        }
+        table->buckets[i] = NULL;
+    }
+    
+    pthread_rwlock_unlock(&table->lock);
+    pthread_rwlock_destroy(&table->lock);
+}
+
+// Helper function to create a complete HTTP response (optimized)
 static int create_http_response(RouteResponse *response, const char *body, size_t body_length, 
                                const char *content_type, int status_code, const char *status_message) {
     if (!response || !body) return -1;
     
     // Calculate required buffer size
-    size_t headers_size = 256; // Approximate headers size
-    size_t total_size = headers_size + body_length;
-    
-    // Allocate response buffer
-    response->data = malloc(total_size);
-    if (!response->data) return -1;
-    
-    // Format HTTP response with proper headers
     time_t now;
     time(&now);
     struct tm *tm_info = gmtime(&now);
     char date_buf[128];
     strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", tm_info);
     
-    int written = snprintf(response->data, total_size,
-        "HTTP/1.1 %d %s\r\n"
-        "Date: %s\r\n"
-        "Server: AIONIC/1.0\r\n"
-        "Content-Type: %s\r\n"
-        "Content-Length: %zu\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "%s", 
-        status_code, status_message, date_buf, content_type, body_length, body);
+    // Calculate headers size
+    size_t headers_size = 128;  // Base size
+    headers_size += strlen(date_buf);
+    headers_size += strlen(content_type);
+    headers_size += 32;  // For status and other fields
     
-    response->length = written;
+    size_t total_size = headers_size + body_length;
+    
+    // Allocate response buffer
+    response->data = malloc(total_size);
+    if (!response->data) return -1;
+    
+    // Build response directly in memory
+    char *ptr = response->data;
+    
+    // Add HTTP status line
+    ptr += sprintf(ptr, "HTTP/1.1 %d %s\r\n", status_code, status_message);
+    
+    // Add headers
+    ptr += sprintf(ptr, "Date: %s\r\n", date_buf);
+    ptr += sprintf(ptr, "Server: AIONIC/1.0\r\n");
+    ptr += sprintf(ptr, "Content-Type: %s\r\n", content_type);
+    ptr += sprintf(ptr, "Content-Length: %zu\r\n", body_length);
+    ptr += sprintf(ptr, "Connection: close\r\n\r\n");
+    
+    // Add body
+    memcpy(ptr, body, body_length);
+    
+    // Set response properties
+    response->length = (ptr - response->data) + body_length;
     response->status_code = status_code;
     response->status_message = (char *)status_message;
     response->is_streaming = 0;
@@ -64,22 +213,47 @@ static int create_http_response(RouteResponse *response, const char *body, size_
     return 0;
 }
 
-int route_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
+// Create error response with consistent format
+int create_error_response(RouteResponse *response, RouteError error, int status_code) {
+    const char *error_message = route_error_messages[error];
     
-    // Initialize response
-    memset(response, 0, sizeof(RouteResponse));
+    // Create JSON error response
+    char *json_response = malloc(256);
+    if (!json_response) return ROUTE_ERROR_MEMORY;
     
-    // Look for a matching route handler
-    for (int i = 0; i < route_count; i++) {
-        if (method_matches(routes[i].method, request->method) && 
-            strcmp(routes[i].path, request->path) == 0) {
-            // Execute the handler
-            return routes[i].handler(request, response);
-        }
-    }
+    snprintf(json_response, 256, 
+            "{\"error\": \"%s\", \"code\": %d, \"timestamp\": %ld}", 
+            error_message, error, time(NULL));
     
-    // No matching route found - return a professional 404 page
+    // Create HTTP response
+    int result = create_http_response(response, json_response, strlen(json_response), 
+                                    "application/json", status_code, error_message);
+    
+    free(json_response);
+    return result;
+}
+
+// Copy a response to another (for cached responses)
+static int copy_route_response(const RouteResponse *source, RouteResponse *dest) {
+    if (!source || !dest) return -1;
+    
+    // Allocate memory for the data
+    dest->data = malloc(source->length);
+    if (!dest->data) return -1;
+    
+    // Copy the data
+    memcpy(dest->data, source->data, source->length);
+    dest->length = source->length;
+    dest->status_code = source->status_code;
+    dest->status_message = source->status_message;
+    dest->is_streaming = source->is_streaming;
+    
+    return 0;
+}
+
+// Initialize cached responses
+static void init_cached_responses() {
+    // Initialize 404 response
     const char *not_found_html = 
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
@@ -143,191 +317,10 @@ int route_request(HTTPRequest *request, RouteResponse *response) {
         "</body>\n"
         "</html>";
     
-    return create_http_response(response, not_found_html, strlen(not_found_html), 
-                               "text/html", 404, "Not Found");
-}
-
-void free_route_response(RouteResponse *response) {
-    if (!response) return;
+    create_http_response(&cached_404_response, not_found_html, strlen(not_found_html), 
+                         "text/html", 404, "Not Found");
     
-    if (response->data) free(response->data);
-    if (response->stream_data) free(response->stream_data);
-    
-    for (int i = 0; i < response->header_count; i++) {
-        if (response->headers[i]) free(response->headers[i]);
-    }
-    
-    memset(response, 0, sizeof(RouteResponse));
-}
-
-int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPRequest *, RouteResponse *)) {
-    // Expand routes array if needed
-    if (route_count >= route_capacity) {
-        int new_capacity = route_capacity == 0 ? 8 : route_capacity * 2;
-        Route *new_routes = realloc(routes, sizeof(Route) * new_capacity);
-        if (!new_routes) return -1;
-        
-        routes = new_routes;
-        route_capacity = new_capacity;
-    }
-    
-    routes[route_count].path = strdup(path);
-    routes[route_count].method = method;
-    routes[route_count].handler = handler;
-    route_count++;
-    
-    return 0;
-}
-
-// Function to handle chat requests using optimized functions
-int handle_chat_request_optimized(const HTTPRequest *request, RouteResponse *response) {
-    // Extract the prompt from the request
-    const char *prompt = NULL;
-    if (request->body) {
-        // Simple parsing - in a real implementation, you would use proper JSON parsing
-        if (strstr(request->body, "\"prompt\"")) {
-            prompt = strstr(request->body, "\"prompt\"") + 9;
-            if (*prompt == '"') prompt++;
-            const char *end = strchr(prompt, '"');
-            if (end) {
-                size_t prompt_len = end - prompt;
-                char *prompt_copy = malloc(prompt_len + 1);
-                if (prompt_copy) {
-                    // Use optimized memcpy to copy the prompt
-                    memcpy_asm(prompt_copy, prompt, prompt_len);
-                    prompt_copy[prompt_len] = '\0';
-                    
-                    // Use optimized CRC32 to compute hash of the prompt
-                    uint32_t prompt_hash = crc32_asm(prompt_copy, prompt_len);
-                    
-                    // Create JSON response with hash information
-                    char *json_response = malloc(4096);
-                    if (json_response) {
-                        snprintf(json_response, 4096, 
-                                "{\"response\": \"Processed with optimized functions (hash: %u)\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
-                                prompt_hash, time(NULL));
-                        
-                        // Create HTTP response
-                        int result = create_http_response(response, json_response, strlen(json_response), 
-                                                         "application/json", 200, "OK");
-                        free(json_response);
-                        free(prompt_copy);
-                        return result;
-                    }
-                    free(prompt_copy);
-                }
-            }
-        }
-    }
-    
-    // Fallback to error response
-    const char *error_response = "{\"error\": \"Invalid request format\"}";
-    return create_http_response(response, error_response, strlen(error_response), 
-                               "application/json", 400, "Bad Request");
-}
-
-int handle_chat_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
-    
-    // Extract prompt from request body
-    char prompt[1024] = {0};
-    if (request->body && parse_json(request->body, prompt) == 0) {
-        printf("Received prompt: %s\n", prompt);
-        
-        // In a real implementation, the prompt would be sent to an AI model
-        // Here we'll create a sophisticated response
-        
-        // Create JSON response with AI-generated content
-        char *json_response = malloc(4096);
-        if (!json_response) {
-            return create_http_response(response, "Internal Server Error", 
-                                      strlen("Internal Server Error"), 
-                                      "text/plain", 500, "Internal Server Error");
-        }
-        
-        snprintf(json_response, 4096, 
-                "{\"response\": \"Hello! I've received your message: '%s'. This is a response from the AIONIC AI Web Server.\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
-                prompt, time(NULL));
-        
-        // Create HTTP response
-        int result = create_http_response(response, json_response, strlen(json_response), 
-                                         "application/json", 200, "OK");
-        free(json_response);
-        
-        return result;
-    } else {
-        // Error parsing request
-        const char *error_html = 
-            "<!DOCTYPE html>\n"
-            "<html lang=\"en\">\n"
-            "<head>\n"
-            "    <meta charset=\"UTF-8\">\n"
-            "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
-            "    <title>400 - Bad Request | AIONIC Server</title>\n"
-            "    <style>\n"
-            "        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f8f9fa; }\n"
-            "        .container { background-color: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); padding: 30px; text-align: center; }\n"
-            "        h1 { color: #e67e22; margin-bottom: 20px; }\n"
-            "        .home-link { display: inline-block; background-color: #3498db; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; transition: background-color 0.3s; }\n"
-            "        .home-link:hover { background-color: #2980b9; }\n"
-            "        .footer { margin-top: 30px; font-size: 0.9em; color: #7f8c8d; }\n"
-            "    </style>\n"
-            "</head>\n"
-            "<body>\n"
-            "    <div class=\"container\">\n"
-            "        <h1>400 - Bad Request</h1>\n"
-            "        <p>The request could not be understood by the server due to malformed syntax.</p>\n"
-            "        <p>Please check your request and try again.</p>\n"
-            "        <a href=\"/\" class=\"home-link\">Go to Homepage</a>\n"
-            "        <div class=\"footer\">\n"
-            "            <p>Powered by AIONIC AI Web Server</p>\n"
-            "        </div>\n"
-            "    </div>\n"
-            "</body>\n"
-            "</html>";
-        
-        return create_http_response(response, error_html, strlen(error_html), 
-                                   "text/html", 400, "Bad Request");
-    }
-}
-
-int handle_stats_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
-    
-    // In a real implementation, stats would be fetched from the server
-    char *stats_json = malloc(1024);
-    if (!stats_json) {
-        return create_http_response(response, "Internal Server Error", 
-                                  strlen("Internal Server Error"), 
-                                  "text/plain", 500, "Internal Server Error");
-    }
-    
-    snprintf(stats_json, 1024, 
-            "{\"requests\": %lu, \"responses\": %lu, \"uptime\": %ld, \"active_connections\": %d, \"timestamp\": %ld}", 
-            (unsigned long)0, (unsigned long)0, (long)0, 0, time(NULL));
-    
-    int result = create_http_response(response, stats_json, strlen(stats_json), 
-                                     "application/json", 200, "OK");
-    free(stats_json);
-    
-    return result;
-}
-
-int handle_health_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
-    
-    const char *health_response = "{\"status\": \"ok\", \"timestamp\": %ld, \"server\": \"AIONIC/1.0\"}";
-    char health_json[128];
-    snprintf(health_json, sizeof(health_json), health_response, time(NULL));
-    
-    return create_http_response(response, health_json, strlen(health_json), 
-                               "application/json", 200, "OK");
-}
-
-// Handle root path request
-int handle_root_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
-    
+    // Initialize root response
     const char *root_html = 
         "<!DOCTYPE html>\n"
         "<html lang=\"en\">\n"
@@ -433,16 +426,218 @@ int handle_root_request(HTTPRequest *request, RouteResponse *response) {
         "</body>\n"
         "</html>";
     
-    return create_http_response(response, root_html, strlen(root_html), 
-                               "text/html", 200, "OK");
+    create_http_response(&cached_root_response, root_html, strlen(root_html), 
+                         "text/html", 200, "OK");
+}
+
+// ===== Core Routing Functions =====
+
+// Register a new route with parameter support
+int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPRequest *, RouteResponse *)) {
+    Route *route = malloc(sizeof(Route));
+    if (!route) return -1;
+    
+    route->path = strdup(path);
+    route->method = method;
+    route->handler = handler;
+    route->param_count = 0;
+    route->next = NULL;
+    
+    // Parse path for parameters (e.g., /users/:id)
+    char *path_copy = strdup(path);
+    char *token = strtok(path_copy, "/");
+    while (token != NULL && route->param_count < MAX_ROUTE_PARAMS) {
+        if (token[0] == ':') {
+            // This is a parameter
+            strncpy(route->param_names[route->param_count], token + 1, 31);
+            route->param_names[route->param_count][31] = '\0';
+            route->param_count++;
+        }
+        token = strtok(NULL, "/");
+    }
+    free(path_copy);
+    
+    // Add to hash table
+    return hash_table_add(&routes_table, route);
+}
+
+// Register a middleware function
+int register_middleware(MiddlewareFunc middleware) {
+    if (middleware_count >= MAX_MIDDLEWARE) {
+        return -1;  // Maximum middleware reached
+    }
+    
+    middlewares[middleware_count++] = middleware;
+    return 0;
+}
+
+// Route a request to the appropriate handler
+int route_request(HTTPRequest *request, RouteResponse *response) {
+    if (!request || !response) {
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+    }
+    
+    memset(response, 0, sizeof(RouteResponse));
+    
+    // Apply middleware in order
+    for (int i = 0; i < middleware_count; i++) {
+        int result = middlewares[i](request, response);
+        if (result != 0) {
+            // Middleware returned an error, stop processing
+            return result;
+        }
+        
+        // If middleware created a complete response, return it
+        if (response->data != NULL) {
+            return 0;
+        }
+    }
+    
+    // Check for cached responses first
+    if (strcmp(request->path, "/") == 0 && method_matches(request->method, HTTP_GET)) {
+        return copy_route_response(&cached_root_response, response);
+    }
+    
+    // Look for exact match in hash table
+    Route *route = hash_table_find(&routes_table, request->path, request->method);
+    
+    if (route) {
+        return route->handler(request, response);
+    }
+    
+    // If no exact match, try routes with parameters
+    route = hash_table_find_with_params(&routes_table, request->path, request->method);
+    
+    if (route) {
+        return route->handler(request, response);
+    }
+    
+    // No matching route found - return cached 404 response
+    return copy_route_response(&cached_404_response, response);
+}
+
+// Free route response resources
+void free_route_response(RouteResponse *response) {
+    if (!response) return;
+    
+    if (response->data) free(response->data);
+    if (response->stream_data) free(response->stream_data);
+    
+    for (int i = 0; i < response->header_count; i++) {
+        if (response->headers[i]) free(response->headers[i]);
+    }
+    
+    memset(response, 0, sizeof(RouteResponse));
+}
+
+// ===== Route Handlers =====
+
+// Function to handle chat requests
+int handle_chat_request(HTTPRequest *request, RouteResponse *response) {
+    if (!request || !response) return -1;
+    
+    // Extract prompt from request body
+    char prompt[1024] = {0};
+    if (request->body && parse_json(request->body, prompt) == 0) {
+        printf("Received prompt: %s\n", prompt);
+        
+        // Create JSON response with AI-generated content
+        char *json_response = malloc(4096);
+        if (!json_response) {
+            return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+        }
+        
+        snprintf(json_response, 4096, 
+                "{\"response\": \"Hello! I've received your message: '%s'. This is a response from the AIONIC AI Web Server.\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
+                prompt, time(NULL));
+        
+        // Create HTTP response
+        int result = create_http_response(response, json_response, strlen(json_response), 
+                                         "application/json", 200, "OK");
+        free(json_response);
+        
+        return result;
+    } else {
+        // Error parsing request
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+    }
+}
+
+// Function to handle stats requests
+int handle_stats_request(HTTPRequest *request, RouteResponse *response) {
+    if (!request || !response) return -1;
+    
+    // In a real implementation, stats would be fetched from the server
+    char *stats_json = malloc(1024);
+    if (!stats_json) {
+        return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+    }
+    
+    snprintf(stats_json, 1024, 
+            "{\"requests\": %lu, \"responses\": %lu, \"uptime\": %ld, \"active_connections\": %d, \"timestamp\": %ld}", 
+            (unsigned long)0, (unsigned long)0, (long)0, 0, time(NULL));
+    
+    int result = create_http_response(response, stats_json, strlen(stats_json), 
+                                     "application/json", 200, "OK");
+    free(stats_json);
+    
+    return result;
+}
+
+// Function to handle health requests
+int handle_health_request(HTTPRequest *request, RouteResponse *response) {
+    if (!request || !response) return -1;
+    
+    const char *health_response = "{\"status\": \"ok\", \"timestamp\": %ld, \"server\": \"AIONIC/1.0\"}";
+    char health_json[128];
+    snprintf(health_json, sizeof(health_json), health_response, time(NULL));
+    
+    return create_http_response(response, health_json, strlen(health_json), 
+                               "application/json", 200, "OK");
+}
+
+// Handle root path request
+int handle_root_request(HTTPRequest *request, RouteResponse *response) {
+    if (!request || !response) return -1;
+    
+    return copy_route_response(&cached_root_response, response);
+}
+
+// ===== Initialization and Cleanup =====
+
+// Initialize router system
+void router_init(void) {
+    // Initialize hash table
+    hash_table_init(&routes_table);
+    
+    // Initialize cached responses
+    init_cached_responses();
+    
+    // Initialize middleware (if any)
+    // Example: register_middleware(logging_middleware);
+}
+
+// Clean up router resources
+void router_cleanup(void) {
+    // Free cached responses
+    if (cached_404_response.data) free(cached_404_response.data);
+    if (cached_root_response.data) free(cached_root_response.data);
+    
+    // Free hash table
+    hash_table_free(&routes_table);
 }
 
 // Function to initialize routes
-void init_routes() {
+void init_routes(void) {
+    // Initialize router system
+    router_init();
+    
+    // Register routes
     register_route("/v1/chat", HTTP_POST, handle_chat_request);
     register_route("/stats", HTTP_GET, handle_stats_request);
     register_route("/health", HTTP_GET, handle_health_request);
-    
-    // Add a default route for the root path
     register_route("/", HTTP_GET, handle_root_request);
+    
+    // Example of parameterized route
+    // register_route("/users/:id", HTTP_GET, handle_user_request);
 }

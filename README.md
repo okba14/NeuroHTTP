@@ -24,12 +24,6 @@
 
 For detailed benchmark results comparing NeuroHTTP and NGINX, see [benchmark.md](benchmark.md)
 
-## Features
-- AI-powered routing
-- High-performance caching
-
-  
-
 ---
 
 
@@ -64,81 +58,70 @@ For detailed benchmark results comparing NeuroHTTP and NGINX, see [benchmark.md]
 
 ## 🚀 Overview
 
-**NeuroHTTP** (codename: *AIMux*) is a next-generation web server **purpose-built for AI workloads** — designed from the ground up to meet the demands of modern inference, model routing, and data-intensive API communication.
+**NeuroHTTP** (codename: *AIMux*) is a next-generation web server **purpose-built for the AI era**.  
+Written entirely in **C** and **Assembly**, it delivers low-level performance, predictable latency, and extreme stability under heavy load — without relying on any external frameworks.
 
-Traditional web servers like **Nginx**, **Apache**, or **Node.js** were never optimized for AI's unique I/O and data streaming patterns. **NeuroHTTP** redefines this layer, enabling a new era of AI-native networking built for performance, concurrency, and precision.
+💡 Its mission is to **redefine the networking layer for AI systems**, enabling efficient handling of model streams (LLMs) and data-intensive APIs.
 
-It’s engineered to handle:
-- 🧠 **AI streaming responses** — efficient token-by-token delivery for LLMs and chat APIs.  
-- 📦 **Massive JSON payloads** — low-latency parsing and optimized memory throughput.  
-- ⚡ **Concurrent model routing** — multiplexed inference requests across multiple AI endpoints.  
-- 🔌 **Real-time communication** — leveraging HTTP/3, WebSockets, and gRPC for seamless integration.  
+### Capabilities
+- 🧠 **Real-time AI responses** — token-by-token streaming for LLMs and chat models.  
+- ⚙️ **Fast, low-overhead JSON processing** optimized for inference workloads.  
+- ⚡ **Concurrent model routing (AI multiplexing)** for parallel AI endpoints.  
+- 🔌 **Seamless integration** with HTTP/3, WebSockets, and gRPC.  
 
-> **Goal:** Build the world’s first *AI-native web server* capable of delivering real-time, high-throughput inference APIs with zero overhead.
+> **Goal:** Build the world’s first *AI-native web server* — capable of real-time, high-throughput inference APIs with near-zero overhead.
 
-
----
-
-## 🎯 Why This Project Matters
-
-- 🔥 **No true AI-native web servers exist** — NeuroHTTP pioneers a new category purpose-built for intelligent workloads.  
-- 🧩 **Implemented in C and Assembly**, achieving raw performance that outpaces Node.js, Python, and Go under heavy inference traffic.  
-- 🌍 **The AI API ecosystem is exploding** — from OpenAI and HuggingFace to LangChain and beyond — demanding infrastructure that can actually keep up.  
-- 🧑‍💻 **Fully open-source and developer-first**, empowering a growing community to experiment, extend, and integrate.  
-- ⚙️ **Architected for scale and modularity**, supporting high concurrency, multi-core routing, and plugin-driven extensibility.
+📊 *For detailed performance metrics, see [benchmark.md](./benchmark.md).*
 
 
 ---
 
-## ⚙️ Key Technical Features
+## 🎯 Why It Matters
+
+- 🧠 **First AI-native web server**, built from scratch for intelligent workloads.  
+- ⚙️ **Written in C + Assembly** for unmatched performance and low latency.  
+- 🌍 **Designed for the AI API era** — scalable, modular, and open-source.
+  
+### NeuroHTTP bridges the gap between traditional web servers and modern AI infrastructure.
+
+
+---
+
+## ⚙️ Key Features
 
 | Feature | Description |
 |----------|-------------|
-| ⚡ **Smart Thread Pool** | Adaptive thread scheduling that dynamically allocates workloads based on payload complexity and model concurrency. |
-| 🧠 **AI Stream Mode** | Incremental, token-based response streaming over HTTP/1.1, HTTP/3, or WebSocket — ideal for real-time AI inference. |
-| 🧩 **Assembly-Optimized JSON Parser** | Low-level SIMD-accelerated parser delivering ultra-fast performance for nested or large-scale AI payloads. |
-| 🔐 **Token Quota + API Keys** | Built-in authentication and request quota management designed for multi-tenant AI APIs. |
-| 🛰️ **gRPC & HTTP/3 Ready** | Full support for modern high-throughput protocols, ensuring forward compatibility and minimal latency. |
-| 🧰 **Plugin System (C Modules)** | Extend the server core via dynamically loaded C modules — no recompilation required. |
-| 📊 **Telemetry & Metrics** | Real-time observability: latency, throughput, memory footprint, and event tracing. |
+| ⚡ **Smart Threading** | Dynamic load balancing for AI workloads. |
+| 🧠 **AI Stream Mode** | Token-based real-time responses (HTTP/1.1, HTTP/3, WS). |
+| 🧩 **Fast JSON Parser** | Assembly-optimized, SIMD-accelerated. |
+| 🔐 **API Keys & Quotas** | Built-in auth and rate control. |
+| 🛰️ **gRPC / HTTP/3** | Modern, low-latency protocol support. |
+| 🧰 **C Plugin System** | Extend core via loadable modules. |
+| 📊 **Live Metrics** | Real-time latency and throughput stats. |
 
 
 ---
 
 ## 🧩 Architecture Overview
 
-> **NeuroHTTP** is built around a **highly optimized, AI-native architecture** designed for extreme performance, modular extensibility, and full hardware control.  
-> Every subsystem is implemented in **C**, with critical paths written in **Assembly**, ensuring deterministic speed and low-level efficiency.
+**NeuroHTTP** is a compact, low-level server core built entirely in **C** and **Assembly**,  
+focused on *speed, control,* and *AI-native processing* — no frameworks, no overhead.
 
 ---
 
-### ⚙️ Core Components
+### ⚙️ Core Layers
 
-| 🧱 Component | 💡 Description |
-|--------------|----------------|
-| 🧠 **AI Router** | Integrates multiple AI models *(GPT, Claude, LLaMA, etc.)* directly into the server core — enabling dynamic, intelligent request handling and adaptive routing. |
-| ⚙️ **Worker Threads** | Multi-threaded event loop designed for concurrent request processing and CPU-bound AI workloads. |
-| 🔒 **Internal Firewall** | Built-in security layer for packet inspection and filtering without external dependencies. |
-| ⚡ **Cache System (TTL-based)** | High-speed caching mechanism with configurable TTL (Time-To-Live) for optimal reuse and reduced I/O. |
-| 🔌 **Modular Plugin System** | Extensible plugin framework that allows developers to inject custom logic at runtime. |
-| 🧩 **Smart Optimizer (Runtime)** | Monitors system performance in real-time and dynamically adjusts scheduling, cache size, and routing strategies for optimal throughput. |
-
----
-
-### 🧠 AI-Native Design
-
-Unlike traditional web servers, **NeuroHTTP** embeds intelligence at its core.  
-The integrated **AI Router** fuses multiple language models directly into the HTTP stack, enabling:
-
-- 🧭 **Context-aware routing decisions**  
-- ⚡ **Predictive request handling**  
-- 🧮 **Real-time inference & content generation**  
-- 🔁 **Adaptive optimization based on workload patterns**
+| Layer | Purpose |
+|--------|----------|
+| 🧠 **AI Router** | Direct integration with AI models for smart request handling. |
+| ⚙️ **Worker Engine** | Lightweight thread pool for parallel, CPU-bound tasks. |
+| 🔒 **Security Layer** | Inline packet inspection and basic request filtering. |
+| ⚡ **Cache System** | Fast in-memory cache with auto-expiry. |
+| 🔌 **Plugin Loader** | Extend functionality via loadable C modules. |
 
 ---
 
-> 🚀 **In short:** NeuroHTTP isn’t just a web server — it’s an AI-accelerated, self-optimizing system built for the next era of intelligent networking.
-
+> 🧠 **Essence:** A self-optimizing, AI-aware server core — minimal, fast, and built for the future.
 
 
 ---

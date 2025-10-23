@@ -24,6 +24,18 @@
 
 For detailed benchmark results comparing NeuroHTTP and NGINX, see [benchmark.md](benchmark.md)
 
+## 🧩 Visual Benchmark Evidence
+
+Below are the live screenshots from the actual benchmark runs.
+
+### 🔹 NeuroHTTP — 40,000 Connections
+![NeuroHTTP 40K Benchmark](videos/neurohttp_2.png)
+
+
+### 🔹 NGINX — 40,000 Connections
+![NGINX 40K Benchmark](videos/nginx_2.png)
+
+
 ---
 
 

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <signal.h>
+#include <pthread.h>  // <--- تمت إضافة هذا السطر
 #include "config.h"
 
 typedef struct {
@@ -15,7 +16,7 @@ typedef struct {
     int max_connections;       
     int active_connections;     
     int *epoll_fds;            
-     thread
+    pthread_t thread;          
     volatile sig_atomic_t running; 
     struct {
         uint64_t total_requests;

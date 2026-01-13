@@ -12,7 +12,7 @@ typedef struct {
     time_t last_request;
     int is_blocked;
     time_t block_start_time;
-    int suspicious_score;      // Score for suspicious behavior
+    int suspicious_score;      
 } FirewallEntry;
 
 // ===== Block Reasons =====

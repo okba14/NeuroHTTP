@@ -14,6 +14,7 @@
 #include "stream.h"
 #include "ai/prompt_router.h"
 #include "asm_utils.h"
+#include "server.h" 
 
 // ===== Constants =====
 #define MAX_CACHED_RESPONSES 16
@@ -67,7 +68,7 @@ static int route_matches_with_params(const char *route_path, const char *request
         request_token = strtok(NULL, "/");
     }
     
-    // Both should reach the end
+    // Both should reach end
     return route_token == NULL && request_token == NULL;
 }
 
@@ -180,7 +181,7 @@ static int create_http_response(RouteResponse *response, const char *body, size_
     size_t headers_size = 128;  // Base size
     headers_size += strlen(date_buf);
     headers_size += strlen(content_type);
-    headers_size += 32;  // For status and other fields
+    headers_size += 32;  
     
     size_t total_size = headers_size + body_length;
     
@@ -433,7 +434,7 @@ static void init_cached_responses() {
 // ===== Core Routing Functions =====
 
 // Register a new route with parameter support
-int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPRequest *, RouteResponse *)) {
+int register_route(const char *path, HTTPMethod method, int (*handler)(Server *, HTTPRequest *, RouteResponse *)) {
     Route *route = malloc(sizeof(Route));
     if (!route) return -1;
     
@@ -464,7 +465,7 @@ int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPReque
 // Register a middleware function
 int register_middleware(MiddlewareFunc middleware) {
     if (middleware_count >= MAX_MIDDLEWARE) {
-        return -1;  // Maximum middleware reached
+        return -1;  
     }
     
     middlewares[middleware_count++] = middleware;
@@ -472,7 +473,7 @@ int register_middleware(MiddlewareFunc middleware) {
 }
 
 // Route a request to the appropriate handler
-int route_request(HTTPRequest *request, RouteResponse *response) {
+int route_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     if (!request || !response) {
         return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
     }
@@ -502,14 +503,14 @@ int route_request(HTTPRequest *request, RouteResponse *response) {
     Route *route = hash_table_find(&routes_table, request->path, request->method);
     
     if (route) {
-        return route->handler(request, response);
+        return route->handler(server, request, response);
     }
     
     // If no exact match, try routes with parameters
     route = hash_table_find_with_params(&routes_table, request->path, request->method);
     
     if (route) {
-        return route->handler(request, response);
+        return route->handler(server, request, response);
     }
     
     // No matching route found - return cached 404 response
@@ -533,49 +534,74 @@ void free_route_response(RouteResponse *response) {
 // ===== Route Handlers =====
 
 // Function to handle chat requests
-int handle_chat_request(HTTPRequest *request, RouteResponse *response) {
+int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *response) {
+    (void)server; // Unused
+    
     if (!request || !response) return -1;
     
-    // Extract prompt from request body
-    char prompt[1024] = {0};
-    if (request->body && parse_json(request->body, prompt) == 0) {
-        printf("Received prompt: %s\n", prompt);
-        
-        // Create JSON response with AI-generated content
-        char *json_response = malloc(4096);
-        if (!json_response) {
-            return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+    char *prompt = NULL;
+    int status = -1;
+
+    // === DYNAMIC ALLOCATION FOR LARGE TEXTS ===
+    if (request->body) {
+        prompt = (char *)malloc(request->body_length + 1);
+        if (prompt) {
+            if (parse_json(request->body, prompt, request->body_length + 1) == 0) {
+                printf("Received prompt (%zu bytes): %s\n", strlen(prompt), prompt);
+                
+                size_t response_buf_size = 4096 + strlen(prompt);
+                char *json_response = (char *)malloc(response_buf_size);
+                
+                if (json_response) {
+                    snprintf(json_response, response_buf_size, 
+                            "{\"response\": \"Hello! I've received your full message (%zu bytes): '%s'. This is a response from the AIONIC AI Web Server.\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
+                            strlen(prompt), prompt, time(NULL));
+                    
+                    status = create_http_response(response, json_response, strlen(json_response), 
+                                             "application/json", 200, "OK");
+                    free(json_response);
+                } else {
+                    status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+                }
+            } else {
+                status = create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+            }
+        } else {
+            status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
         }
-        
-        snprintf(json_response, 4096, 
-                "{\"response\": \"Hello! I've received your message: '%s'. This is a response from the AIONIC AI Web Server.\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
-                prompt, time(NULL));
-        
-        // Create HTTP response
-        int result = create_http_response(response, json_response, strlen(json_response), 
-                                         "application/json", 200, "OK");
-        free(json_response);
-        
-        return result;
     } else {
-        // Error parsing request
-        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+        status = create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
     }
+
+    // === CLEANUP ===
+    if (prompt) {
+        free(prompt);
+        prompt = NULL;
+    }
+
+    return status;
 }
 
-// Function to handle stats requests
-int handle_stats_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
+// Function to handle stats requests - FIXED TO USE REAL DATA
+int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *response) {
+    (void)request; // Unused
     
-    // In a real implementation, stats would be fetched from the server
+    if (!server || !response) return -1;
+    
     char *stats_json = malloc(1024);
     if (!stats_json) {
         return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
     }
     
+
+
     snprintf(stats_json, 1024, 
             "{\"requests\": %lu, \"responses\": %lu, \"uptime\": %ld, \"active_connections\": %d, \"timestamp\": %ld}", 
-            (unsigned long)0, (unsigned long)0, (long)0, 0, time(NULL));
+            server->stats.total_requests, 
+            server->stats.total_responses, 
+            (long)0, // Uptime placeholder
+            server->active_connections, 
+            time(NULL));
     
     int result = create_http_response(response, stats_json, strlen(stats_json), 
                                      "application/json", 200, "OK");
@@ -585,8 +611,11 @@ int handle_stats_request(HTTPRequest *request, RouteResponse *response) {
 }
 
 // Function to handle health requests
-int handle_health_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
+int handle_health_request(Server *server, HTTPRequest *request, RouteResponse *response) {
+    (void)server; 
+    (void)request;
+    
+    if (!response) return -1;
     
     const char *health_response = "{\"status\": \"ok\", \"timestamp\": %ld, \"server\": \"AIONIC/1.0\"}";
     char health_json[128];
@@ -597,8 +626,11 @@ int handle_health_request(HTTPRequest *request, RouteResponse *response) {
 }
 
 // Handle root path request
-int handle_root_request(HTTPRequest *request, RouteResponse *response) {
-    if (!request || !response) return -1;
+int handle_root_request(Server *server, HTTPRequest *request, RouteResponse *response) {
+    (void)server;
+    (void)request;
+    
+    if (!response) return -1;
     
     return copy_route_response(&cached_root_response, response);
 }
@@ -613,8 +645,8 @@ void router_init(void) {
     // Initialize cached responses
     init_cached_responses();
     
-    // Initialize middleware (if any)
-    // Example: register_middleware(logging_middleware);
+
+
 }
 
 // Clean up router resources

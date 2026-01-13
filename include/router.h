@@ -2,6 +2,7 @@
 #define AIONIC_ROUTER_H
 
 #include "parser.h"
+#include "server.h" 
 #include <pthread.h>
 
 // Maximum number of routes in the hash table
@@ -9,18 +10,19 @@
 
 // Route structure with parameter handling
 typedef struct Route {
-    char *path;                      // Original path (e.g., "/users/:id")
+    char *path;                      
     HTTPMethod method;
-    int (*handler)(HTTPRequest *, RouteResponse *);
-    struct Route *next;              // Next route in the bucket (for chaining)
-    int param_count;                 // Number of parameters in path
-    char param_names[8][32];        // Parameter names (e.g., "id")
+    // Updated handler signature to include Server * for stats access
+    int (*handler)(Server *, HTTPRequest *, RouteResponse *); 
+    struct Route *next;              
+    int param_count;                 
+    char param_names[8][32];        
 } Route;
 
 // Hash table structure
 typedef struct {
-    Route *buckets[HASH_TABLE_SIZE];  // Array of buckets
-    pthread_rwlock_t lock;            // Read-write lock for the table
+    Route *buckets[HASH_TABLE_SIZE];  
+    pthread_rwlock_t lock;            
 } RouteHashTable;
 
 // Error codes for better error handling
@@ -36,17 +38,17 @@ typedef enum {
 typedef int (*MiddlewareFunc)(HTTPRequest *, RouteResponse *);
 
 // Core routing functions
-int route_request(HTTPRequest *request, RouteResponse *response);
+int route_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
 void free_route_response(RouteResponse *response);
-int register_route(const char *path, HTTPMethod method, int (*handler)(HTTPRequest *, RouteResponse *));
+int register_route(const char *path, HTTPMethod method, int (*handler)(Server *, HTTPRequest *, RouteResponse *)); // Updated signature
 void init_routes(void);
 void router_cleanup(void);
 
 // Route handlers
-int handle_chat_request(HTTPRequest *request, RouteResponse *response);
-int handle_stats_request(HTTPRequest *request, RouteResponse *response);
-int handle_health_request(HTTPRequest *request, RouteResponse *response);
-int handle_root_request(HTTPRequest *request, RouteResponse *response);
+int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
+int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
+int handle_health_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
+int handle_root_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
 
 // Optimization functions
 int register_middleware(MiddlewareFunc middleware);

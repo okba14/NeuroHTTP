@@ -64,7 +64,11 @@ typedef struct {
 
 int parse_http_request(const char *raw_request, HTTPRequest *request);
 void free_http_request(HTTPRequest *request);
-int parse_json(const char *json_string, void *output);
+
+// === FIXED HERE ===
+// Updated signature to match the implementation in src/parser.c
+int parse_json(const char *json_string, void *output, size_t output_size);
+
 int json_get_value(const char *json_string, const char *key, char *output, size_t output_size);
 int parse_json_with_fast_tokenizer(const char *json_str, size_t length, JSONValue *result);  // Added function declaration
 

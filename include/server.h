@@ -14,8 +14,9 @@ typedef struct {
     void *request_queue;       
     int max_connections;       
     int active_connections;     
-    int *epoll_fds;            // Array of epoll file descriptors for each thread
-    volatile sig_atomic_t running; // Flag to control server running state
+    int *epoll_fds;            
+     thread
+    volatile sig_atomic_t running; 
     struct {
         uint64_t total_requests;
         uint64_t total_responses;

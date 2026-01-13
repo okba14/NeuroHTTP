@@ -190,15 +190,15 @@ void free_http_request(HTTPRequest *request) {
     memset(request, 0, sizeof(HTTPRequest));
 }
 
-int parse_json(const char *json_string, void *output) {
-    // Use assembly function for fast JSON parsing
-    if (!json_string || !output) return -1;
+// Fixed: Added output_size to prevent buffer overflow
+int parse_json(const char *json_string, void *output, size_t output_size) {
+    // Validate inputs
+    if (!json_string || !output || output_size == 0) return -1;
     
-    // Here we will use json_fast_tokenizer function written in Assembly
+    // Use assembly function for fast JSON parsing (Read-only, safe)
     json_fast_tokenizer(json_string, strlen(json_string));
     
-    // For simplicity, we'll do basic parsing here
-    // In actual implementation, the assembly function would be used fully
+    // Manual parsing for key extraction
     if (strstr(json_string, "\"prompt\"")) {
         char *prompt_start = strstr(json_string, "\"prompt\"");
         if (prompt_start) {
@@ -210,6 +210,13 @@ int parse_json(const char *json_string, void *output) {
                 char *prompt_end = strchr(prompt_start, '"');
                 if (prompt_end) {
                     size_t prompt_len = prompt_end - prompt_start;
+                    
+                    // === SAFETY FIX ===
+                    // Ensure we do not write beyond the output buffer size
+                    if (prompt_len >= output_size) {
+                        prompt_len = output_size - 1; // Truncate to fit
+                    }
+                    
                     strncpy((char *)output, prompt_start, prompt_len);
                     ((char *)output)[prompt_len] = '\0';
                     return 0;

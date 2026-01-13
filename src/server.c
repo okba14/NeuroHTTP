@@ -167,7 +167,7 @@ static char *get_header_value(const HTTPRequest *request, const char *header_nam
     
     for (int i = 0; i < request->header_count; i++) {
         if (request->headers[i]) {
-            // Check if this header starts with the header name followed by colon
+            // Check if this header starts with header name followed by colon
             if (strncmp(request->headers[i], header_name, name_len) == 0 && 
                 request->headers[i][name_len] == ':') {
                 // Extract the value part (after "header_name:")
@@ -199,7 +199,7 @@ static int is_suspicious_user_agent(const char *user_agent) {
 }
 
 static int is_suspicious_request(const HTTPRequest *request) {
-    // Check for suspicious patterns in the request
+    // Check for suspicious patterns in request
     if (request->path) {
         // Check for path traversal attempts
         if (strstr(request->path, "../") || strstr(request->path, "..\\")) {
@@ -248,7 +248,7 @@ static int is_suspicious_request(const HTTPRequest *request) {
 static int contains_attack_pattern(const char *data, const char *pattern) {
     if (!data || !pattern) return 0;
     
-    // Find the pattern in the data
+    // Find pattern in data
     char *found = strstr(data, pattern);
     if (!found) return 0;
     
@@ -257,7 +257,7 @@ static int contains_attack_pattern(const char *data, const char *pattern) {
     size_t data_len = strlen(data);
     size_t found_pos = found - data;
     
-    // Check character before and after the pattern
+    // Check character before and after pattern
     char before = found_pos > 0 ? data[found_pos - 1] : ' ';
     char after = found_pos + pattern_len < data_len ? data[found_pos + pattern_len] : ' ';
     
@@ -354,7 +354,7 @@ int server_init(Server *server, const Config *config) {
     server->stats.total_requests = 0;
     server->stats.total_responses = 0;
     server->stats.bytes_sent = 0;
-    server->stats.bytes_received = 0;
+    server->stats.bytes_received = 0; // Initialize this
     server->stats.avg_response_time = 0.0;
     
     // Create server socket
@@ -601,7 +601,10 @@ int server_handle_request(Server *server, int client_fd) {
         return -1;  // Error or connection closed
     }
     
-    buffer[bytes_read] = '\0';  // Ensure the string is null-terminated
+    buffer[bytes_read] = '\0';  // Ensure that string is null-terminated
+    
+    // === FIX: Track bytes received in server stats ===
+    server->stats.bytes_received += bytes_read;
     
     printf("DEBUG: Received request:\n%s\n", buffer);
     
@@ -662,7 +665,7 @@ int server_handle_request(Server *server, int client_fd) {
         }
     }
     
-    // If the request contains JSON, use the optimized tokenizer
+    // If request contains JSON, use optimized tokenizer
     if (request.content_type && strstr(request.content_type, "application/json")) {
         JSONValue json_result;
         if (parse_json_with_fast_tokenizer(request.body, request.body_length, &json_result) == 0) {
@@ -675,7 +678,9 @@ int server_handle_request(Server *server, int client_fd) {
     
     // Route request
     RouteResponse response;
-    if (route_request(&request, &response) != 0) {
+    
+    // === FIX: Pass server pointer to route_request ===
+    if (route_request(server, &request, &response) != 0) {
         printf("DEBUG: Failed to route request\n");
         // Error routing
         const char *error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";

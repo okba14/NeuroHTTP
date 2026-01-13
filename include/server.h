@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <signal.h>
-#include <pthread.h>  // <--- تمت إضافة هذا السطر
+#include <pthread.h>  
 #include "config.h"
 
 typedef struct {

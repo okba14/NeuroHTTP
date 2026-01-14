@@ -12,9 +12,13 @@
 ---
 
 # 🚀 Quick Start
-## 1️⃣ Set Up Environment
+## 1️⃣ AI Provider Setup (Optional)
 
-Before running the server, you need to set your OpenAI API key as an environment variable:
+NeuroHTTP is provider-agnostic and does not require a specific AI vendor.
+
+You may run the server using any OpenAI-compatible API, GROQ, or even a local AI model.
+
+If your setup requires an API key, export it as an environment variable:
 
 ```bash
 export OPENAI_API_KEY="gsk_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"

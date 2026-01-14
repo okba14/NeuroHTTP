@@ -124,41 +124,23 @@ Server	Conns	Requests/sec	Avg Latency	Transfer/sec
 NGINX 1.29.3	10k	8,148	114ms	1.2 MB/s
 NeuroHTTP	10k	2,593	57ms	7.9 MB/s
 
-💡 Insight: 
-## NeuroHTTP handles heavier, AI-rich payloads with lower latency and higher transfer per connection.
+💡 **Insight**  
+## NeuroHTTP handles heavier, AI-rich payloads with lower latency and higher throughput per connection.
 
 ---
 
-🎬 Demo
-<p align="center"> <a href="https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4"> <img src="https://img.shields.io/badge/▶️ Watch%20Demo-blue?style=for-the-badge" alt="Watch Demo"> </a> </p>
+## 🌟 Why Star?
+
+- Low latency, high throughput
+- Compact C + Assembly core
+- Open-source & extensible
+
+If you love high-performance AI servers, consider giving the project a ⭐ and sharing it with others.
 
 ---
 
-# 🌟 Why Star?
-
-Low latency, high throughput
-Compact C + Assembly core
-Open-source & extensible
-
-If you love high-performance AI servers, give us a ⭐ and share with your friends! 🚀
-
----
-
-## 🧬 Author
-
-**👨‍💻 GUIAR OQBA** 🇩🇿  
-Creator of **NeuroHTTP** — passionate about **low-level performance**, **AI infrastructure**, and **modern web systems**.
-
-> _“Empowering the next generation of AI-native infrastructure — from Elkantara, Algeria.”_
-
-<p align="center">
-  <img src="https://img.shields.io/badge/El%20Kantara-Algeria-006233?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAA8AAAAQCAYAAADJViUEAAAAVklEQVQoz2NgoBAw4v///zH5j4GBQYyBgRj4z0SfwYHBv8nAwMCfMZkABhYGBgYGxv+HQ0P5n8DBwYN5wMDAwMiJrQxjYCgYGBg8EUUioM4xjAAAyNg4MSceOtwAAAABJRU5ErkJggg==">
-</p>
-
-<p align="center">
-  <sub>© 2025 GUIAR OQBA — All rights reserved.</sub>
-</p>
-
+© 2025 GUIAR OQBA  
+Licensed under the **MIT License**.
 
 ---
 
@@ -180,6 +162,15 @@ Creator of **NeuroHTTP** — passionate about **low-level performance**, **AI in
 </p>
 
 <p align="center">
-  If you believe in the vision of a <strong>fast, AI-native web layer</strong>, please ⭐ the repository and share it.<br/>
-  Every star fuels the open-source ecosystem and helps <strong>NeuroHTTP</strong> evolve. 🚀
+  If you believe in the vision of a <strong>fast, AI-native web layer</strong>,  
+  your support helps <strong>NeuroHTTP</strong> evolve. 🚀
 </p>
+
+---
+
+## 🧬 Author
+
+**👨‍💻 GUIAR OQBA** 🇩🇿  
+Creator of **NeuroHTTP** — focused on **low-level performance**, **AI infrastructure**, and **modern web systems**.
+
+> _“Building the next generation of AI-native infrastructure — from El Kantara, Algeria.”_

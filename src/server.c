@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
-#define MAX_EVENTS 1024   // Maximum number of events in epoll_wait
-#define BACKLOG 128       // Number of pending connections before accept
+#define MAX_EVENTS 1024   
+#define BACKLOG 128       
 
 // ===== Standard Library Headers =====
 #include <stdio.h>
@@ -17,7 +17,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <ctype.h>
-#include <strings.h>  // Added for strcasecmp
+#include <strings.h>  
 
 // ===== Project Headers =====
 #include "server.h"
@@ -34,7 +34,7 @@ typedef struct {
     Server *server;
     int epoll_fd;
     int id;
-    FirewallStats firewall_stats;  // Per-thread firewall statistics
+    FirewallStats firewall_stats;  
 } ThreadData;
 
 // Connection tracking structure
@@ -143,9 +143,9 @@ static int extract_api_key(const HTTPRequest *request) {
                 
                 // Format: "Bearer <key>" or "ApiKey <key>"
                 if (strstr(value, "Bearer ") == value) {
-                    return 1;  // Valid Bearer token
+                    return 1;  
                 } else if (strstr(value, "ApiKey ") == value) {
-                    return 1;  // Valid ApiKey
+                    return 1;  
                 }
             }
         }

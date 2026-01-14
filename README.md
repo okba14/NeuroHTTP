@@ -127,22 +127,15 @@ NeuroHTTP	10k	2,593	57ms	7.9 MB/s
 💡 Insight: 
 ## NeuroHTTP handles heavier, AI-rich payloads with lower latency and higher transfer per connection.
 
--------------------------------------------------------------------------------------------------------------------------------
+---
+
 🎬 Demo
 <p align="center"> <a href="https://github.com/okba14/NeuroHTTP/raw/main/videos/demo.mp4"> <img src="https://img.shields.io/badge/▶️ Watch%20Demo-blue?style=for-the-badge" alt="Watch Demo"> </a> </p>
 
-
-# ⚙️ Key Features
-
-🧠 Real-time AI token streaming (HTTP/1.1, HTTP/3, WebSocket)
-⚡ SIMD-accelerated, fast JSON parser
-🧩 Multi-threaded AI router for parallel requests
-🔌 Plugin system for custom modules
-🔐 Built-in security & rate limiting
+---
 
 # 🌟 Why Star?
 
-Handles large AI prompts safely
 Low latency, high throughput
 Compact C + Assembly core
 Open-source & extensible

@@ -2,7 +2,7 @@
 #define AIONIC_CONFIG_H
 
 
-typedef struct {
+typedef struct Config {
     int port;                
     int thread_count;        
     int max_connections;     

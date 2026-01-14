@@ -5,9 +5,11 @@ CC = gcc
 ASM = nasm
 ASMFLAGS = -f elf64
 CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -mtune=native -flto -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -no-pie -flto -lpthread -ldl -lm
+# === MODIFIED: Added -lcurl ===
+LDFLAGS = -no-pie -flto -lpthread -ldl -lm -lcurl
 DEBUG_CFLAGS = -Wall -Wextra -std=c11 -g -O0 -DDEBUG -D_POSIX_C_SOURCE=200809L
-DEBUG_LDFLAGS = -no-pie -lpthread -ldl -lm
+# === MODIFIED: Added -lcurl for debug build ===
+DEBUG_LDFLAGS = -no-pie -lpthread -ldl -lm -lcurl
 
 # Directories
 SRC_DIR = src
@@ -125,11 +127,11 @@ clean:
 # Clean and rebuild
 rebuild: clean all
 
-# Run the server
+# Run
 run: $(TARGET)
 	./$(TARGET)
 
-# Run debug server
+# Run debug
 run-debug: $(DEBUG_TARGET)
 	./$(DEBUG_TARGET)
 
@@ -178,7 +180,7 @@ help:
 	@echo "  analyze     - Static analysis"
 	@echo "  format      - Format code"
 	@echo "  memcheck    - Check memory leaks"
-	@echo "  profile     - Profile the application"
+	@echo "  profile     - Profile application"
 	@echo "  help        - Show this help"
 
 .PHONY: all debug dirs plugins tests test install uninstall clean rebuild run run-debug benchmark docs analyze format memcheck profile help

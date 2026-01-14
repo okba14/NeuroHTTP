@@ -137,34 +137,40 @@ int stream_response(int client_fd, RouteResponse *response) {
     
     // If response is streaming, send data in chunks
     if (response->is_streaming && response->data) {
-        // Split data into small chunks
-        const char *chunks[] = {
-            "Hello",
-            " from",
-            " AIONIC",
-            " AI",
-            " Server!",
-            "\nThis",
-            " is",
-            " a",
-            " streaming",
-            " response."
-        };
+        // UPDATED: Instead of hardcoded strings, we split the actual response data
+        // into smaller chunks to simulate streaming or just send it.
+        // For true AI streaming, this function would be called repeatedly by a callback.
         
-        for (size_t i = 0; i < sizeof(chunks)/sizeof(chunks[0]); i++) {
-            if (stream_send_chunk(&stream, chunks[i], strlen(chunks[i])) != 0) {
+        size_t chunk_size = 32; // Small chunks for demo
+
+        
+        // Note: response->length is usually the HTTP packet size including headers.
+        // But for streaming logic, we usually just care about the body. 
+        // Assuming response->data points to the body content for streaming purposes here.
+        
+        char *data_ptr = response->data;
+        size_t remaining = strlen(data_ptr); // Assuming null-terminated string for body
+
+        while (remaining > 0) {
+            size_t to_send = (remaining < chunk_size) ? remaining : chunk_size;
+            
+            if (stream_send_chunk(&stream, data_ptr, to_send) != 0) {
                 stream_cleanup(&stream);
                 return -1;
             }
             
-            // Wait a bit between chunks
+            data_ptr += to_send;
+            remaining -= to_send;
+            
+            // Simulate slight delay between chunks
             struct timespec ts;
             ts.tv_sec = 0;
-            ts.tv_nsec = 100000000; // 100ms
+            ts.tv_nsec = 50000000; // 50ms
             nanosleep(&ts, NULL);
         }
+
     } else if (response->data) {
-        // Send data as a single chunk
+        // Send data as a single chunk (Standard blocking response)
         if (stream_send_chunk(&stream, response->data, response->length) != 0) {
             stream_cleanup(&stream);
             return -1;

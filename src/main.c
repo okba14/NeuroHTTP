@@ -6,18 +6,18 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <time.h>  // for nanosleep
+#include <time.h>  
 #include <pthread.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <sys/inotify.h>
 #include <stdarg.h>
-#include <limits.h>  // For PATH_MAX
-#include <netinet/in.h>  // For INET6_ADDRSTRLEN
-#include <arpa/inet.h>  // For inet_ntop
-#include <sys/stat.h>   // For stat() instead of access()
-#include <fcntl.h>      // For open() and related flags
-#include <errno.h>      // For errno
+#include <limits.h>  
+#include <netinet/in.h>  
+#include <arpa/inet.h>  
+#include <sys/stat.h>   
+#include <fcntl.h>      
+#include <errno.h>      
 
 // ===== Project Headers =====
 #include "config.h"
@@ -252,7 +252,7 @@ static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
     
     va_list args;
     va_start(args, format);
-    // Use vfprintf with a constant format string to prevent format string vulnerabilities
+
     vfprintf(logger->output, format, args);
     va_end(args);
     
@@ -514,9 +514,7 @@ static void *worker_thread(void *arg) {
     
     // Worker thread main loop
     while (running) {
-        // Process tasks from the queue
-        // This would be implemented based on your task queue system
-        // For now, just sleep to avoid busy waiting
+        
         struct timespec ts;
         ts.tv_sec = 0;
         ts.tv_nsec = 10000000; // 10ms
@@ -605,7 +603,7 @@ static int safe_file_exists(const char *path) {
 static int load_hierarchical_config(const char *base_path, Config *config) {
     char path[PATH_MAX];
     
-    // Try to load base configuration first
+
     snprintf(path, sizeof(path), "%s/base.conf", base_path);
     if (safe_file_exists(path)) {
         if (load_config(path, config) != 0) {
@@ -613,7 +611,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
             return -1;
         }
     } else {
-        // If base.conf doesn't exist, try the original config file
+
         snprintf(path, sizeof(path), "%s/aionic.conf", base_path);
         if (load_config(path, config) != 0) {
             handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load configuration"));
@@ -621,7 +619,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
         }
     }
     
-    // Load environment-specific configuration if it exists
+
     const char *env = getenv("AIONIC_ENV");
     if (env) {
         snprintf(path, sizeof(path), "%s/%s.conf", base_path, env);
@@ -632,7 +630,7 @@ static int load_hierarchical_config(const char *base_path, Config *config) {
         }
     }
     
-    // Load local configuration if it exists
+
     snprintf(path, sizeof(path), "%s/local.conf", base_path);
     if (safe_file_exists(path)) {
         if (load_config(path, config) != 0) {
@@ -683,10 +681,10 @@ static void check_config_reload(AionicSystem *system) {
     if (length > 0) {
         logger_log(&system->logger, LOG_LEVEL_INFO, "Configuration file modified, reloading...");
         
-        // Save current configuration
+
         Config old_config = system->config;
         
-        // Try to load new configuration
+
         if (load_hierarchical_config("config", &system->config) != 0) {
             logger_log(&system->logger, LOG_LEVEL_ERROR, 
                        "Failed to reload configuration, using previous settings");
@@ -694,8 +692,7 @@ static void check_config_reload(AionicSystem *system) {
         } else {
             logger_log(&system->logger, LOG_LEVEL_INFO, "Configuration reloaded successfully");
             
-            // Apply changes as needed
-            // This would depend on what configuration options can be changed at runtime
+            
         }
     }
 }

@@ -11,11 +11,14 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <arpa/inet.h>
-#include <ctype.h> 
+#include <ctype.h>
+#include <strings.h>
 
 // ===== Project Headers =====
+#include "config.h"
 #include "firewall.h"
 #include "utils.h"
+#include "server.h"
 
 // ===== Enhanced Firewall Structure =====
 typedef struct {
@@ -37,6 +40,9 @@ typedef struct {
     // Configuration
     RateLimitConfig rate_limit_config;
     
+    // State Control (Prevents Double Init)
+    int is_initialized; 
+    
     // Statistics
     FirewallStats stats;
 } Firewall;
@@ -44,6 +50,39 @@ typedef struct {
 static Firewall global_firewall;
 
 // ===== Static Helper Functions =====
+
+
+static char *stristr(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return NULL;
+    
+    char *h = (char *)haystack;
+    char *n = (char *)needle;
+    
+    while (*h) {
+        char *h_ptr = h;
+        char *n_ptr = n;
+        
+        while (*h_ptr && *n_ptr && tolower(*h_ptr) == tolower(*n_ptr)) {
+            h_ptr++;
+            n_ptr++;
+        }
+        
+        if (*n_ptr == '\0') return h;
+        h++;
+    }
+    return NULL;
+}
+
+
+static void update_suspicion(FirewallEntry *entry, int score_add) {
+
+    if (entry->suspicious_score > 0) {
+        entry->suspicious_score = (int)(entry->suspicious_score * 0.95);
+    }
+    
+    entry->suspicious_score += score_add;
+}
+
 static FirewallEntry *find_entry(const char *ip_address) {
     for (int i = 0; i < global_firewall.entry_count; i++) {
         if (strcmp(global_firewall.entries[i].ip_address, ip_address) == 0) {
@@ -106,14 +145,19 @@ static int detect_attack_pattern(const char *request_data) {
         return 0;
     }
     
+    int max_severity = 0;
     for (int i = 0; i < global_firewall.attack_pattern_count; i++) {
-        if (strstr(request_data, global_firewall.attack_patterns[i].pattern)) {
+        // Use stristr for case-insensitive matching (Bypasses Case variations)
+        if (stristr(request_data, global_firewall.attack_patterns[i].pattern)) {
             global_firewall.attack_patterns[i].last_detected = time(NULL);
             global_firewall.stats.attack_pattern_hits++;
-            return global_firewall.attack_patterns[i].severity;
+            
+            if (global_firewall.attack_patterns[i].severity > max_severity) {
+                max_severity = global_firewall.attack_patterns[i].severity;
+            }
         }
     }
-    return 0;
+    return max_severity;
 }
 
 static int detect_brute_force(const char *ip_address) {
@@ -149,12 +193,21 @@ static int get_requests_in_window(const char *ip_address, time_t window_seconds)
     return requests_in_window;
 }
 
-// ===== Core Functions (Original Interface) =====
-int firewall_init(const Config *config) {
+// ===== Core Functions (Fixed Initialization) =====
+int firewall_init(const struct Config *config) {
+    // === IDEMPOTENCY CHECK (The fix for duplicate logs) ===
+    if (global_firewall.is_initialized) {
+        log_message("FIREWALL", "Firewall already initialized. Skipping duplicate init.");
+        return 0;
+    }
+
+    pthread_mutex_lock(&global_firewall.mutex);
+
     // Initialize basic firewall
     global_firewall.entry_capacity = 1024;
     global_firewall.entries = calloc(global_firewall.entry_capacity, sizeof(FirewallEntry));
     if (!global_firewall.entries) {
+        pthread_mutex_unlock(&global_firewall.mutex);
         return -1;
     }
     
@@ -170,8 +223,16 @@ int firewall_init(const Config *config) {
     global_firewall.rate_limit_config.brute_force_window_seconds = 300; // 5 minutes
     
     // Initialize enhanced features
-    global_firewall.attack_patterns = NULL;
+
+    int initial_patterns = 25; // Estimate of patterns we add
+    global_firewall.attack_patterns = calloc(initial_patterns, sizeof(AttackPattern));
+    if (!global_firewall.attack_patterns) {
+        free(global_firewall.entries);
+        pthread_mutex_unlock(&global_firewall.mutex);
+        return -1;
+    }
     global_firewall.attack_pattern_count = 0;
+
     global_firewall.whitelist = NULL;
     global_firewall.whitelist_count = 0;
     global_firewall.blacklist = NULL;
@@ -181,46 +242,73 @@ int firewall_init(const Config *config) {
     memset(&global_firewall.stats, 0, sizeof(FirewallStats));
     global_firewall.stats.start_time = time(NULL);
     
-    if (pthread_mutex_init(&global_firewall.mutex, NULL) != 0) {
-        free(global_firewall.entries);
-        return -1;
-    }
-    
     if (config && config->api_key_count > 0) {
         global_firewall.allowed_api_keys = malloc(sizeof(char *) * config->api_key_count);
         if (!global_firewall.allowed_api_keys) {
             free(global_firewall.entries);
-            pthread_mutex_destroy(&global_firewall.mutex);
+            free(global_firewall.attack_patterns);
+            pthread_mutex_unlock(&global_firewall.mutex);
             return -1;
         }
         
         for (int i = 0; i < config->api_key_count; i++) {
             global_firewall.allowed_api_keys[i] = strdup(config->api_keys[i]);
         }
-        
         global_firewall.api_key_count = config->api_key_count;
     }
     
-    // Add default attack patterns
-    firewall_add_attack_pattern(" UNION ", 8);
-    firewall_add_attack_pattern(" OR 1=1", 9);
-    firewall_add_attack_pattern(" DROP TABLE", 10);
-    firewall_add_attack_pattern("<script>", 7);
-    firewall_add_attack_pattern("../", 5);
-    firewall_add_attack_pattern("SELECT * FROM", 8);
-    firewall_add_attack_pattern("INSERT INTO", 7);
-    firewall_add_attack_pattern("DELETE FROM", 8);
-    firewall_add_attack_pattern("UPDATE SET", 7);
+    // === SINGLE POINT OF TRUTH (Initial Attack Patterns) ===
+
     
-    log_message("FIREWALL", "Enhanced firewall initialized v" FIREWALL_VERSION_STRING);
+    // SQL Injection
+    strncpy(global_firewall.attack_patterns[0].pattern, " UNION ", 255); global_firewall.attack_patterns[0].severity = 8;
+    strncpy(global_firewall.attack_patterns[1].pattern, " OR 1=1", 255); global_firewall.attack_patterns[1].severity = 9;
+    strncpy(global_firewall.attack_patterns[2].pattern, " DROP TABLE", 255); global_firewall.attack_patterns[2].severity = 10;
+    strncpy(global_firewall.attack_patterns[3].pattern, " SELECT * FROM", 255); global_firewall.attack_patterns[3].severity = 8;
+    strncpy(global_firewall.attack_patterns[4].pattern, " INSERT INTO", 255); global_firewall.attack_patterns[4].severity = 7;
+    strncpy(global_firewall.attack_patterns[5].pattern, " DELETE FROM", 255); global_firewall.attack_patterns[5].severity = 8;
+    strncpy(global_firewall.attack_patterns[6].pattern, " UPDATE SET", 255); global_firewall.attack_patterns[6].severity = 7;
+    strncpy(global_firewall.attack_patterns[7].pattern, " HAVING ", 255); global_firewall.attack_patterns[7].severity = 7;
+    strncpy(global_firewall.attack_patterns[8].pattern, "--", 255); global_firewall.attack_patterns[8].severity = 5;
+
+    // XSS (Cross Site Scripting) - Critical for WAF
+    strncpy(global_firewall.attack_patterns[9].pattern, "<script", 255); global_firewall.attack_patterns[9].severity = 9;
+    strncpy(global_firewall.attack_patterns[10].pattern, "javascript:", 255); global_firewall.attack_patterns[10].severity = 8;
+    strncpy(global_firewall.attack_patterns[11].pattern, "onload=", 255); global_firewall.attack_patterns[11].severity = 8;
+    strncpy(global_firewall.attack_patterns[12].pattern, "onerror=", 255); global_firewall.attack_patterns[12].severity = 8;
+    strncpy(global_firewall.attack_patterns[13].pattern, "alert(", 255); global_firewall.attack_patterns[13].severity = 8;
+    strncpy(global_firewall.attack_patterns[14].pattern, "document.cookie", 255); global_firewall.attack_patterns[14].severity = 8;
+    strncpy(global_firewall.attack_patterns[15].pattern, "eval(", 255); global_firewall.attack_patterns[15].severity = 9;
+    strncpy(global_firewall.attack_patterns[16].pattern, "iframe", 255); global_firewall.attack_patterns[16].severity = 7;
+    strncpy(global_firewall.attack_patterns[17].pattern, "fromCharCode", 255); global_firewall.attack_patterns[17].severity = 8;
+
+    // Path Traversal
+    strncpy(global_firewall.attack_patterns[18].pattern, "../", 255); global_firewall.attack_patterns[18].severity = 5;
+    strncpy(global_firewall.attack_patterns[19].pattern, "%2e%2e", 255); global_firewall.attack_patterns[19].severity = 5; // Encoded ..
+    strncpy(global_firewall.attack_patterns[20].pattern, "..\\", 255); global_firewall.attack_patterns[20].severity = 5;
+
+    // Common Bad User Agents (Scanners)
+    strncpy(global_firewall.attack_patterns[21].pattern, "sqlmap", 255); global_firewall.attack_patterns[21].severity = 10;
+    strncpy(global_firewall.attack_patterns[22].pattern, "nmap", 255); global_firewall.attack_patterns[22].severity = 10;
+    strncpy(global_firewall.attack_patterns[23].pattern, "nikto", 255); global_firewall.attack_patterns[23].severity = 10;
+    strncpy(global_firewall.attack_patterns[24].pattern, "masscan", 255); global_firewall.attack_patterns[24].severity = 10;
+
+    // Set counts
+    global_firewall.attack_pattern_count = 25; 
+
+    // Mark as initialized
+    global_firewall.is_initialized = 1;
+    
+    pthread_mutex_unlock(&global_firewall.mutex);
+    log_message("FIREWALL", "Enterprise Firewall initialized. Signature Database Loaded.");
     return 0;
 }
 
 int firewall_check_request(const char *ip_address, const char *api_key) {
-    return firewall_check_request_enhanced(ip_address, api_key, NULL);
+    return firewall_check_request_enhanced(ip_address, api_key, NULL, NULL);
 }
 
-int firewall_check_request_enhanced(const char *ip_address, const char *api_key, const char *request_data) {
+int firewall_check_request_enhanced(const char *ip_address, const char *api_key, const char *request_data, const char *user_agent) {
     if (!ip_address) {
         return -1;
     }
@@ -234,7 +322,7 @@ int firewall_check_request_enhanced(const char *ip_address, const char *api_key,
         return 0;
     }
     
-    // Check blacklist
+    // Check blacklist (Hard Block)
     if (is_ip_blacklisted(ip_address)) {
         global_firewall.stats.blocked_requests++;
         pthread_mutex_unlock(&global_firewall.mutex);
@@ -264,37 +352,39 @@ int firewall_check_request_enhanced(const char *ip_address, const char *api_key,
         }
     }
     
-    // Detect brute force attempts
-    if (detect_brute_force(ip_address)) {
-        entry->is_blocked = 1;
-        entry->block_start_time = time(NULL);
-        global_firewall.stats.brute_force_attempts++;
-        global_firewall.stats.blocked_requests++;
-        
-        char log_msg[256];
-        snprintf(log_msg, sizeof(log_msg), "IP blocked due to brute force: %s", ip_address);
-        log_message("FIREWALL", log_msg);
-        
-        pthread_mutex_unlock(&global_firewall.mutex);
-        return -1;
-    }
+    // === REAL WAF LOGIC ===
     
-    // Check for attack patterns in request data
-    if (request_data) {
-        int severity = detect_attack_pattern(request_data);
-        if (severity > 5) { // High severity
+    // 1. User-Agent Scanning Detection
+    if (user_agent) {
+        int scanner_severity = detect_attack_pattern(user_agent);
+        if (scanner_severity >= 10) {
+            log_message("FIREWALL_WAF", "Malicious Scanner Blocked via User-Agent");
             entry->is_blocked = 1;
             entry->block_start_time = time(NULL);
-            entry->suspicious_score += severity * 10;
-            global_firewall.stats.suspicious_activities++;
+            update_suspicion(entry, 50); // Heavy penalty
             global_firewall.stats.blocked_requests++;
-            
-            char log_msg[256];
-            snprintf(log_msg, sizeof(log_msg), "IP blocked due to attack pattern (severity %d): %s", severity, ip_address);
-            log_message("FIREWALL", log_msg);
-            
             pthread_mutex_unlock(&global_firewall.mutex);
             return -1;
+        }
+    }
+
+    // 2. Request Content Analysis (SQLi/XSS)
+    if (request_data) {
+        int payload_severity = detect_attack_pattern(request_data);
+        if (payload_severity > 5) {
+            update_suspicion(entry, payload_severity * 5);
+            
+            char log_msg[512];
+            snprintf(log_msg, sizeof(log_msg), "Suspicious Payload Detected (Severity %d) from %s", payload_severity, ip_address);
+            log_message("FIREWALL_WAF", log_msg);
+
+            if (entry->suspicious_score >= global_firewall.rate_limit_config.suspicious_threshold) {
+                entry->is_blocked = 1;
+                entry->block_start_time = time(NULL);
+                global_firewall.stats.blocked_requests++;
+                pthread_mutex_unlock(&global_firewall.mutex);
+                return -1;
+            }
         }
     }
     
@@ -302,7 +392,7 @@ int firewall_check_request_enhanced(const char *ip_address, const char *api_key,
     if (global_firewall.api_key_count > 0) {
         if (!api_key) {
             global_firewall.stats.invalid_api_keys++;
-            entry->suspicious_score += 5;
+            update_suspicion(entry, 5);
             pthread_mutex_unlock(&global_firewall.mutex);
             return -1;
         }
@@ -317,18 +407,12 @@ int firewall_check_request_enhanced(const char *ip_address, const char *api_key,
         
         if (!api_key_valid) {
             global_firewall.stats.invalid_api_keys++;
-            entry->suspicious_score += 10;
+            update_suspicion(entry, 10);
             
-            // Block if suspicious score is too high
             if (entry->suspicious_score >= global_firewall.rate_limit_config.suspicious_threshold) {
                 entry->is_blocked = 1;
                 entry->block_start_time = time(NULL);
                 global_firewall.stats.blocked_requests++;
-                
-                char log_msg[256];
-                snprintf(log_msg, sizeof(log_msg), "IP blocked due to suspicious behavior: %s", ip_address);
-                log_message("FIREWALL", log_msg);
-                
                 pthread_mutex_unlock(&global_firewall.mutex);
                 return -1;
             }
@@ -342,7 +426,10 @@ int firewall_check_request_enhanced(const char *ip_address, const char *api_key,
     entry->request_count++;
     entry->last_request = time(NULL);
     
-    int requests_in_window = get_requests_in_window(ip_address, 60); // 1 minute window
+    // Decay suspicion slightly for good behavior per request
+    update_suspicion(entry, 0); 
+    
+    int requests_in_window = get_requests_in_window(ip_address, 60);
     
     if (requests_in_window > global_firewall.rate_limit_config.max_requests_per_minute) {
         entry->is_blocked = 1;
@@ -849,6 +936,9 @@ int firewall_clear_all(void) {
     // Reset statistics
     memset(&global_firewall.stats, 0, sizeof(FirewallStats));
     global_firewall.stats.start_time = time(NULL);
+    
+    // Reset Init State (Re-fire init next time)
+    global_firewall.is_initialized = 0;
     
     pthread_mutex_unlock(&global_firewall.mutex);
     

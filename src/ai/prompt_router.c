@@ -6,13 +6,14 @@
 #include <string.h>
 #include <pthread.h>
 
+// ===== External Library for Networking (HTTPS) =====
+#include <curl/curl.h>
+
 // ===== Project Headers =====
 #include "prompt_router.h"
 #include "parser.h"
 #include "utils.h"
 #include "asm_utils.h"
-
-
 
 // AI model structure definition
 typedef struct {
@@ -35,47 +36,96 @@ typedef struct {
 
 static PromptRouter global_router;
 
-// Function to parse AI model response
+// === Helper: Structure to hold CURL response data ===
+struct MemoryStruct {
+    char *memory;
+    size_t size;
+};
+
+// === Helper: CURL Write Callback ===
+
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+
+    char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+    if (!ptr) {
+        // Out of memory!
+        printf("[AI_ROUTER] Error: Not enough memory (realloc returned NULL)\n");
+        return 0;
+    }
+
+    mem->memory = ptr;
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
+
+    return realsize;
+}
+
+// === Helper: Build JSON Payload (OpenAI Format) ===
+static char* build_json_payload(const char *model_name, const char *prompt, float temp) {
+
+    size_t prompt_len = strlen(prompt);
+    size_t len = prompt_len + 256; 
+
+    char *json = malloc(len);
+    if (!json) return NULL;
+
+    // Constructing JSON: {"model": "...", "messages": [{"role": "user", "content": "..."}], "temperature": ...}
+    snprintf(json, len, 
+        "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"temperature\": %.1f}", 
+        model_name, prompt, temp);
+    
+    return json;
+}
+
+// Function to parse AI model response (Adapted for OpenAI/Groq format)
 static int parse_ai_response(const char *raw_response, char *output, size_t output_size) {
     if (!raw_response || !output || output_size == 0) {
         return -1;
     }
     
-    // Search for response text in JSON
-    char *response_start = strstr(raw_response, "\"response\":");
-    if (!response_start) {
-        return -1;
-    }
+
+    char *content_start = strstr(raw_response, "\"content\":");
     
-    response_start += strlen("\"response\":");
-    
-    // Skip spaces and colon
-    while (*response_start && (*response_start == ' ' || *response_start == ':')) {
-        response_start++;
-    }
-    
-    if (*response_start == '"') {
-        response_start++;
-        char *response_end = strchr(response_start, '"');
-        if (!response_end) {
+    if (!content_start) {
+
+        content_start = strstr(raw_response, "\"response\":");
+        if (!content_start) {
             return -1;
         }
+    }
+    
+    content_start += strlen(content_start[0] == 'r' ? "\"response\":" : "\"content\":");
+    
+
+    while (*content_start && (*content_start == ' ' || *content_start == ':')) {
+        content_start++;
+    }
+    
+    if (*content_start == '"') {
+        content_start++; 
         
-        size_t response_len = response_end - response_start;
-        if (response_len >= output_size) {
-            response_len = output_size - 1;
+
+        size_t i = 0;
+        while (*content_start && *content_start != '"' && i < output_size - 1) {
+
+            if (*content_start == '\\' && *(content_start + 1) == '"') {
+                output[i++] = '"';
+                content_start += 2;
+            } else {
+                output[i++] = *content_start++;
+            }
         }
-        
-        strncpy(output, response_start, response_len);
-        output[response_len] = '\0';
-        
+        output[i] = '\0';
         return 0;
     }
     
     return -1;
 }
 
-// Function to send request to AI model
+// Function to send request to AI model (REAL IMPLEMENTATION)
 static int send_to_model(AIModel *model, const char *prompt, char *response, size_t response_size) {
     if (!model || !prompt || !response || response_size == 0) {
         return -1;
@@ -83,16 +133,73 @@ static int send_to_model(AIModel *model, const char *prompt, char *response, siz
     
     pthread_mutex_lock(&model->mutex);
     
-    // Simulate sending request to AI model
-    // In actual implementation, a real HTTP request would be made here
-    
-    char log_msg[512];
-    snprintf(log_msg, sizeof(log_msg), "Sending prompt to model %s: %s", model->name, prompt);
-    log_message("AI_ROUTER", log_msg);
-    
-    // Fake response - use parse_ai_response to avoid warning
-    const char *fake_raw_response = "{\"response\": \"This is a simulated AI response\"}";
-    parse_ai_response(fake_raw_response, response, response_size);
+    CURL *curl;
+    CURLcode res;
+    struct MemoryStruct chunk;
+    chunk.memory = malloc(1); 
+    chunk.size = 0;
+
+    curl = curl_easy_init();
+    if(curl) {
+        // Build JSON payload
+        char *json_payload = build_json_payload(model->name, prompt, model->temperature);
+        if (!json_payload) {
+            pthread_mutex_unlock(&model->mutex);
+            free(chunk.memory);
+            return -1;
+        }
+
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        
+        // Handle API Key (Check environment variable)
+
+        char *api_key = getenv("OPENAI_API_KEY");
+        if (api_key) {
+            char auth_header[256];
+            snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", api_key);
+            headers = curl_slist_append(headers, auth_header);
+        } else {
+            log_message("AI_ROUTER", "Warning: OPENAI_API_KEY environment variable not set.");
+        }
+
+        // Set CURL options
+        curl_easy_setopt(curl, CURLOPT_URL, model->api_endpoint);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+        
+        // Disable SSL verification for development purposes 
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); 
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        // Perform request
+        char log_msg[512];
+        snprintf(log_msg, sizeof(log_msg), "Sending real request to model %s at %s", model->name, model->api_endpoint);
+        log_message("AI_ROUTER", log_msg);
+
+        res = curl_easy_perform(curl);
+
+        if(res != CURLE_OK) {
+            snprintf(response, response_size, "{\"error\": \"curl_easy_perform() failed: %s\"}", curl_easy_strerror(res));
+        } else {
+            // Parse the received JSON
+            if (parse_ai_response(chunk.memory, response, response_size) != 0) {
+
+                strncpy(response, chunk.memory, response_size);
+                response[response_size - 1] = '\0';
+            }
+        }
+
+        // Cleanup resources
+        free(chunk.memory);
+        free(json_payload);
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    } else {
+        strncpy(response, "{\"error\": \"Failed to initialize CURL\"}", response_size);
+    }
     
     pthread_mutex_unlock(&model->mutex);
     return 0;
@@ -100,7 +207,7 @@ static int send_to_model(AIModel *model, const char *prompt, char *response, siz
 
 // Function to route prompts using optimized functions
 int route_prompt_optimized(const char *prompt, char *response, size_t response_size, const char *model_name) {
-    // Use optimized CRC32 to create a hash of the prompt for caching/routing
+
     uint32_t prompt_hash = crc32_asm(prompt, strlen(prompt));
     
     // Use optimized memcpy for copying data
@@ -108,13 +215,13 @@ int route_prompt_optimized(const char *prompt, char *response, size_t response_s
     if (prompt_copy) {
         memcpy_asm(prompt_copy, prompt, strlen(prompt) + 1);
         
-        // Process the prompt copy
+
         // ...
         
         free(prompt_copy);
     }
     
-    // For now, just return a simple response
+
     snprintf(response, response_size, 
              "{\"response\": \"Processed with optimized functions (hash: %u)\", \"model\": \"%s\"}", 
              prompt_hash, model_name);
@@ -122,8 +229,11 @@ int route_prompt_optimized(const char *prompt, char *response, size_t response_s
     return 0;
 }
 
-// Initialize prompt router
+// Initialize prompt router 
 int prompt_router_init() {
+
+    curl_global_init(CURL_GLOBAL_ALL);
+
     global_router.model_capacity = 8;
     global_router.models = calloc(global_router.model_capacity, sizeof(AIModel));
     if (!global_router.models) {
@@ -138,15 +248,22 @@ int prompt_router_init() {
         return -1;
     }
     
-    // Add default models
-    prompt_router_add_model("gpt-3.5-turbo", "https://api.openai.com/v1/chat/completions", 2048, 0.7);
-    prompt_router_add_model("claude-2", "https://api.anthropic.com/v1/messages", 4096, 0.5);
-    prompt_router_add_model("llama-2", "http://localhost:8000/completion", 1024, 0.8);
+    // === UPDATED GROQ MODELS (2025 Compatible) ===
+    // Endpoint: https://api.groq.com/openai/v1/chat/completions
     
-    // Set default model
-    global_router.default_model = strdup("gpt-3.5-turbo");
+    // 1. Llama 3.3 70B Versatile 
+    prompt_router_add_model("llama-3.3-70b-versatile", "https://api.groq.com/openai/v1/chat/completions", 8192, 0.7);
     
-    log_message("AI_ROUTER", "Prompt router initialized");
+    // 2. Llama 3.1 8B Instant 
+    prompt_router_add_model("llama-3.1-8b-instant", "https://api.groq.com/openai/v1/chat/completions", 8192, 0.7);
+    
+    // 3. Gemma 2 9B IT 
+    prompt_router_add_model("gemma2-9b-it", "https://api.groq.com/openai/v1/chat/completions", 8192, 0.7);
+
+
+    global_router.default_model = strdup("llama-3.3-70b-versatile");
+    
+    log_message("AI_ROUTER", "Prompt router initialized with updated GROQ support");
     return 0;
 }
 
@@ -364,6 +481,9 @@ void prompt_router_cleanup() {
     
     pthread_mutex_unlock(&global_router.mutex);
     pthread_mutex_destroy(&global_router.mutex);
+    
+    // Cleanup CURL globally
+    curl_global_cleanup();
     
     log_message("AI_ROUTER", "Prompt router cleaned up");
 }

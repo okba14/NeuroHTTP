@@ -105,7 +105,7 @@ static int tokenize_text(const char *text, Token **tokens, int *token_count) {
         
         // Secure copy with explicit null termination
         strncpy((*tokens)[*token_count].text, start, length);
-        (*tokens)[*token_count].text[length] = '\0'; // Ensure null-termination
+        (*tokens)[*token_count].text[length] = '\0'; 
         (*tokens)[*token_count].id = *token_count;
         (*tokens)[*token_count].type = type;
         
@@ -237,7 +237,7 @@ int tokenizer_tokenize(const char *text, Token ***tokens, int *token_count) {
     }
     free(raw_tokens);
     
-    // Use log_message if available, otherwise use printf
+
     #ifdef LOG_MESSAGE_AVAILABLE
     char log_msg[256];
     snprintf(log_msg, sizeof(log_msg), "Tokenized text into %d tokens", *token_count);
@@ -262,14 +262,14 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
         if (tokens[i]) {
             size_t token_len = strlen(tokens[i]->text);
             if (token_len > SIZE_MAX - total_length) {
-                return -1; // Prevent integer overflow
+                return -1; 
             }
             total_length += token_len;
             
             // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
                 if (total_length >= SIZE_MAX - 1) {
-                    return -1; // Prevent integer overflow
+                    return -1; 
                 }
                 total_length++;
             }
@@ -287,10 +287,10 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
     for (int i = 0; i < token_count; i++) {
         if (tokens[i]) {
             size_t token_len = strlen(tokens[i]->text);
-            size_t remaining = output_size - current_len - 1; // Space for null terminator
+            size_t remaining = output_size - current_len - 1; 
             
             if (token_len >= remaining) {
-                return -1; // Not enough space
+                return -1; 
             }
             
             // Safe concatenation
@@ -300,7 +300,7 @@ int tokenizer_detokenize(Token **tokens, int token_count, char *output, size_t o
             // Add space if needed
             if (i < token_count - 1 && tokens[i]->type == 0 && tokens[i+1]->type == 0) {
                 if (current_len >= output_size - 1) {
-                    return -1; // Not enough space
+                    return -1; 
                 }
                 strncat(output, " ", output_size - current_len - 1);
                 current_len++;

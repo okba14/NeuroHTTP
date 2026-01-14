@@ -43,6 +43,38 @@ static const char* route_error_messages[] = {
 
 // ===== Helper Functions =====
 
+// Simple helper to extract a string from JSON body (Basic implementation)
+// Assumes input is like {"key": "value"}
+static char* extract_json_value(const char *json, const char *key) {
+    if (!json || !key) return NULL;
+    
+    char search_key[128];
+    snprintf(search_key, sizeof(search_key), "\"%s\"", key);
+    
+    char *key_pos = strstr(json, search_key);
+    if (!key_pos) return NULL;
+    
+    key_pos += strlen(search_key);
+    while (*key_pos && (*key_pos == ' ' || *key_pos == ':')) {
+        key_pos++;
+    }
+    
+    if (*key_pos == '"') {
+        key_pos++;
+        char *end = strchr(key_pos, '"');
+        if (end) {
+            size_t len = end - key_pos;
+            char *value = malloc(len + 1);
+            if (value) {
+                strncpy(value, key_pos, len);
+                value[len] = '\0';
+                return value;
+            }
+        }
+    }
+    return NULL;
+}
+
 // Helper function to check if a method matches
 static int method_matches(HTTPMethod method1, HTTPMethod method2) {
     return method1 == method2;
@@ -533,39 +565,69 @@ void free_route_response(RouteResponse *response) {
 
 // ===== Route Handlers =====
 
-// Function to handle chat requests
+// Function to handle chat requests (UPDATED TO USE REAL AI ROUTER)
 int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     (void)server; // Unused
     
     if (!request || !response) return -1;
     
     char *prompt = NULL;
+    char *model_name = NULL;
     int status = -1;
 
-    // === DYNAMIC ALLOCATION FOR LARGE TEXTS ===
-    if (request->body) {
-        prompt = (char *)malloc(request->body_length + 1);
-        if (prompt) {
-            if (parse_json(request->body, prompt, request->body_length + 1) == 0) {
-                printf("Received prompt (%zu bytes): %s\n", strlen(prompt), prompt);
+    // === PARSE REQUEST BODY ===
+    if (request->body && request->body_length > 0) {
+        // Try to extract 'prompt' from JSON
+        prompt = extract_json_value(request->body, "prompt");
+        // Try to extract 'model' (optional), default to NULL
+        model_name = extract_json_value(request->body, "model");
+
+        if (!prompt) {
+            // If parsing fails, try using the whole body as prompt (fallback)
+            prompt = malloc(request->body_length + 1);
+            if(prompt) {
+                strncpy(prompt, request->body, request->body_length);
+                prompt[request->body_length] = '\0';
+            } else {
+                return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+            }
+        }
+
+        printf("[ROUTER] Received prompt: %s\n", prompt);
+
+        // Buffer for AI response
+        size_t ai_buf_size = 8192;
+        char *ai_response = (char *)malloc(ai_buf_size);
+        
+        if (ai_response) {
+            // === CALL THE REAL AI ROUTER ===
+            int route_result = prompt_router_route(prompt, model_name, ai_response, ai_buf_size);
+            
+            if (route_result == 0) {
+                // Construct the JSON response for the client
+                // We wrap the AI content in a JSON structure
+                size_t response_len = strlen(ai_response) + 256;
+                char *json_output = (char *)malloc(response_len);
                 
-                size_t response_buf_size = 4096 + strlen(prompt);
-                char *json_response = (char *)malloc(response_buf_size);
-                
-                if (json_response) {
-                    snprintf(json_response, response_buf_size, 
-                            "{\"response\": \"Hello! I've received your full message (%zu bytes): '%s'. This is a response from the AIONIC AI Web Server.\", \"model\": \"aionic-1.0\", \"timestamp\": %ld}", 
-                            strlen(prompt), prompt, time(NULL));
+                if (json_output) {
+                    snprintf(json_output, response_len, 
+                            "{\"response\": \"%s\", \"model\": \"%s\", \"status\": \"success\"}", 
+                            ai_response, model_name ? model_name : "default");
                     
-                    status = create_http_response(response, json_response, strlen(json_response), 
+                    status = create_http_response(response, json_output, strlen(json_output), 
                                              "application/json", 200, "OK");
-                    free(json_response);
+                    free(json_output);
                 } else {
                     status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
                 }
             } else {
-                status = create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+                // Router returned an error
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg), "AI Router Error: Failed to process request");
+                status = create_http_response(response, error_msg, strlen(error_msg), 
+                                             "application/json", 502, "Bad Gateway");
             }
+            free(ai_response);
         } else {
             status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
         }
@@ -574,15 +636,13 @@ int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *res
     }
 
     // === CLEANUP ===
-    if (prompt) {
-        free(prompt);
-        prompt = NULL;
-    }
+    if (prompt) free(prompt);
+    if (model_name) free(model_name);
 
     return status;
 }
 
-// Function to handle stats requests - FIXED TO USE REAL DATA
+// Function to handle stats requests
 int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     (void)request; // Unused
     
@@ -593,8 +653,6 @@ int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *re
         return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
     }
     
-
-
     snprintf(stats_json, 1024, 
             "{\"requests\": %lu, \"responses\": %lu, \"uptime\": %ld, \"active_connections\": %d, \"timestamp\": %ld}", 
             server->stats.total_requests, 
@@ -644,9 +702,6 @@ void router_init(void) {
     
     // Initialize cached responses
     init_cached_responses();
-    
-
-
 }
 
 // Clean up router resources
@@ -669,7 +724,4 @@ void init_routes(void) {
     register_route("/stats", HTTP_GET, handle_stats_request);
     register_route("/health", HTTP_GET, handle_health_request);
     register_route("/", HTTP_GET, handle_root_request);
-    
-    // Example of parameterized route
-    // register_route("/users/:id", HTTP_GET, handle_user_request);
 }

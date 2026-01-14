@@ -104,8 +104,7 @@ static int load_stats_from_file(const char *filename) {
         return -1;
     }
     
-    // In actual implementation, a real JSON parser would be used here
-    // For simplicity, we'll load dummy stats
+   
     
     pthread_mutex_lock(&global_stats.mutex);
     
@@ -145,9 +144,9 @@ typedef struct {
     size_t capacity;
 } Stats;
 
-// Function to update stats using optimized functions
+
 void stats_update_optimized(Stats *stats, const char *key, uint64_t value) {
-    // Use optimized CRC32 to compute hash of the key
+
     uint32_t key_hash = crc32_asm(key, strlen(key));
     
     // Find or create the stat entry
@@ -197,10 +196,10 @@ int stats_init(const char *stats_file, int auto_save_interval) {
         return -1;
     }
     
-    // Load stats from file if it exists
+
     load_stats_from_file(global_stats.stats_file);
     
-    // Use log_message if available, otherwise use printf
+
     #ifdef LOG_MESSAGE_AVAILABLE
     log_message("STATS", "Stats collector initialized");
     #else
@@ -394,7 +393,7 @@ int stats_auto_save() {
         if (save_stats_to_file(global_stats.stats_file) == 0) {
             global_stats.last_save_time = current_time;
             
-            // Use log_message if available, otherwise use printf
+
             #ifdef LOG_MESSAGE_AVAILABLE
             log_message("STATS", "Stats auto-saved to file");
             #else
@@ -412,7 +411,7 @@ int stats_auto_save() {
 int stats_save() {
     int result = save_stats_to_file(global_stats.stats_file);
     if (result == 0) {
-        // Use log_message if available, otherwise use printf
+
         #ifdef LOG_MESSAGE_AVAILABLE
         log_message("STATS", "Stats saved to file");
         #else

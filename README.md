@@ -11,29 +11,64 @@
 
 ---
 
-## 🚀 Quick Start
+# 🚀 Quick Start
+## 1️⃣ Set Up Environment
+
+Before running the server, you need to set your OpenAI API key as an environment variable:
+
+```bash
+export OPENAI_API_KEY="gsk_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+```
+## 2️⃣ Install Dependencies
+
+On Debian / Ubuntu / Kali:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libcurl4-openssl-dev build-essential
+```
+
+## 3️⃣ Clone the Repository & Build the Server
 
 ```bash
 git clone https://github.com/okba14/NeuroHTTP.git
 cd NeuroHTTP
-make all
+make rebuild
+```
+The make rebuild command compiles the server from scratch.
+
+## 4️⃣ Run the Server
+
+```bash
 ./bin/aionic
 ```
+The server will run on port 8080 by default.
+Logs are displayed in the same terminal.
 
-# Test with curl:
+## 5️⃣ Send a Test Request (curl)
 
-```bash
-curl -X POST -H "Content-Type: application/json" \
--d '{"prompt":"Hello"}' http://localhost:8080/v1/chat
-```
-
-# Response example:
+Open a second terminal and send a POST request:
 
 ```bash
-{"response":"Hello! AI server received your prompt."}
-
+curl -X POST http://localhost:8080/v1/chat \
+-H "Content-Type: application/json" \
+-d '{"prompt": "Hello."}'
 ```
 
+## 6️⃣ Example Response
+
+```bash
+{
+  "response": "Hello! AI server received your prompt."
+}
+```
+Users can now send any prompt to the AI server.
+
+# 🔧 Important Notes
+
+* Make sure the OPENAI_API_KEY environment variable is set before starting the server.
+* To change the port or server options, edit include/config.h.
+* The server uses libcurl to communicate with the AI backend.
 ---
 
 ## Benchmark Comparison

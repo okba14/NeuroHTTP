@@ -72,7 +72,7 @@ Users can now send any prompt to the AI server.
 <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;">
 
   <div style="flex: 1 1 150px; max-width: 200px; text-align: center;">
-    <img src="videos/1.png" alt="Example Request" style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
+    <img src="videos/0.png" alt="Example Request" style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
     <p style="font-size: 0.85em; color: #555; margin-top: 5px;">
       Example of sending a POST request to the server.
     </p>

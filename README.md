@@ -71,30 +71,19 @@ Users can now send any prompt to the AI server.
 <!-- Professional Screenshots Layout (smaller images) -->
 <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;">
 
-  <div style="flex: 1 1 150px; max-width: 200px; text-align: center;">
-    <img src="videos/0.png" alt="Example Request" style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
-    <p style="font-size: 0.85em; color: #555; margin-top: 5px;">
-      Example of sending a POST request to the server.
-    </p>
-  </div>
-
-  <div style="flex: 1 1 150px; max-width: 200px; text-align: center;">
-    <img src="videos/2.png" alt="Example Response" style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
-    <p style="font-size: 0.85em; color: #555; margin-top: 5px;">
-      Server response displayed in terminal.
-    </p>
-  </div>
-
-  <div style="flex: 1 1 150px; max-width: 200px; text-align: center;">
-    <img src="videos/3.png" alt="Full Conversation" style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
-    <p style="font-size: 0.85em; color: #555; margin-top: 5px;">
-      Full AI conversation example in terminal.
-    </p>
+  <div style="flex: 1 1 150px; max-width: 220px; text-align: center;">
+    <img src="videos/0.png" alt="NeuroHTTP AI Inference Example"
+         style="width: 100%; border: 1px solid #ccc; border-radius: 8px;">
+  <strong>Real AI inference request.</strong><br>
+  POST <code>/v1/chat</code> handled by NeuroHTTP, parsed at low level
+  and routed to a real LLM backend (LLaMA-based API).<br>
+  Shows full request lifecycle, logging, and successful <code>200 OK</code> response.
+</p>
   </div>
 
 </div>
 
- 
+---
 
 # 🔧 Important Notes
 

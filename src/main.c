@@ -17,7 +17,8 @@
 #include <arpa/inet.h>  
 #include <sys/stat.h>   
 #include <fcntl.h>      
-#include <errno.h>      
+#include <errno.h>
+#include <stdint.h> // Added for uint32_t support
 
 // ===== Project Headers =====
 #include "config.h"
@@ -56,6 +57,11 @@
 
 // ===== Constants =====
 #define CONFIG_WATCH_BUFFER_SIZE 4096
+
+// ===== External Assembly Functions (Linkage) =====
+// Declaring functions from crc32.s to make them available in C
+extern uint32_t crc32_asm(const void *data, size_t length);
+extern uint32_t crc32_asm_avx2(const void *data, size_t length);
 
 // ===== Error Codes =====
 typedef enum {
@@ -743,6 +749,10 @@ int main(int argc, char *argv[]) {
     // Initialize logger
     logger_init(&system.logger, LOG_LEVEL_INFO, stdout, 1);
     
+    // Detect CPU Features (Hardware Acceleration Support)
+    // This must be called before checking flags to populate them
+    detect_cpu_features();
+
     // Register signal handlers
     signal(SIGINT, handle_signal);
     signal(SIGTERM, handle_signal);
@@ -753,6 +763,32 @@ int main(int argc, char *argv[]) {
     logger_log(&system.logger, LOG_LEVEL_INFO, "Hardware acceleration support:");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX2: %s", has_avx2_support() ? "Yes" : "No");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX-512: %s", has_avx512_support() ? "Yes" : "No");
+
+    // ===== Assembly Functions Linkage Verification =====
+    // This block links and tests the functions from crc32.s
+    {
+        const char *test_vector = "AIONIC-Hardware-Acceleration-Test";
+        size_t len = strlen(test_vector);
+        uint32_t crc_val = 0;
+        
+        logger_log(&system.logger, LOG_LEVEL_INFO, "Verifying Assembly Linkage...");
+        
+        // Test Standard SSE4.2 Implementation
+        crc_val = crc32_asm(test_vector, len);
+        logger_log(&system.logger, LOG_LEVEL_INFO, "   [CRC32-SSE4.2] Checksum: 0x%08X", crc_val);
+        
+        // Test AVX2 Implementation (Only if supported)
+        if (has_avx2_support()) {
+            uint32_t crc_avx2 = crc32_asm_avx2(test_vector, len);
+            logger_log(&system.logger, LOG_LEVEL_INFO, "   [CRC32-AVX2]   Checksum: 0x%08X", crc_avx2);
+            
+            // Optional: Consistency check (warning if mismatch)
+            if (crc_val != crc_avx2) {
+                 logger_log(&system.logger, LOG_LEVEL_WARNING, "   [WARNING] CRC32 mismatch between implementations!");
+            }
+        }
+    }
+    // ===================================================
     
     // Initialize config paths
     if (config_paths_init(&system.config_paths) != 0) {
@@ -817,7 +853,7 @@ int main(int argc, char *argv[]) {
         // Use nanosleep instead of usleep
         struct timespec ts;
         ts.tv_sec = 0;
-        ts.tv_nsec = 100000000; // 100ms = 100,000,000 nanoseconds
+        ts.tv_nsec = 100000000; 
         nanosleep(&ts, NULL);
     }
     

@@ -349,34 +349,33 @@ char *str_replace(const char *orig, const char *rep, const char *with) {
 }
 
 // ===== CPU Feature Detection Cache =====
-typedef struct {
-    atomic_bool initialized;
-    bool avx2;
-    bool avx512;
-    bool sse42;
-    bool popcnt;
-} cpu_features_t;
 
-static cpu_features_t cpu_features = {.initialized = ATOMIC_VAR_INIT(false)};
 
-static void detect_cpu_features(void) {
-    if (atomic_load(&cpu_features.initialized)) return;
+// Global variable matching include/asm_utils.h
+cpu_features_t cpu_features;
+
+// Internal flag to ensure we detect CPU features only once
+static atomic_bool cpu_features_detected = ATOMIC_VAR_INIT(false);
+
+void detect_cpu_features(void) {
+    if (atomic_load(&cpu_features_detected)) return;
     
     unsigned int eax, ebx, ecx, edx;
     
     // Check for AVX2
     eax = 7; ecx = 0;
     __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "0"(eax), "2"(ecx));
-    cpu_features.avx2 = (ebx & (1 << 5)) != 0;
-    cpu_features.avx512 = (ebx & (1 << 16)) != 0;
+    cpu_features.avx2 = (ebx & (1 << 5)) ? 1 : 0;
+    cpu_features.avx512 = (ebx & (1 << 16)) ? 1 : 0;
     
-    // Check for SSE4.2 and POPCNT
+    // Check for SSE4.2
     eax = 1;
     __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "0"(eax));
-    cpu_features.sse42 = (ecx & (1 << 20)) != 0;
-    cpu_features.popcnt = (ecx & (1 << 23)) != 0;
+    cpu_features.sse42 = (ecx & (1 << 20)) ? 1 : 0;
     
-    atomic_store(&cpu_features.initialized, true);
+    
+    
+    atomic_store(&cpu_features_detected, true);
 }
 
 int has_avx2_support(void) {
@@ -387,4 +386,9 @@ int has_avx2_support(void) {
 int has_avx512_support(void) {
     detect_cpu_features();
     return cpu_features.avx512;
+}
+
+int has_sse42_support(void) {
+    detect_cpu_features();
+    return cpu_features.sse42;
 }

@@ -254,7 +254,7 @@ At a high level, each request follows this path:
 
 Understanding this flow is essential for grasping NeuroHTTP’s performance characteristics, particularly its ability to maintain **low and stable latency** under AI-heavy workloads.
 
-![NeuroHTTP Architecture Diagram](video/arch.png)
+![NeuroHTTP Architecture Diagram](NeuroHTTP/videos/arch.png)
 
 **Source files:** `server.c`, `firewall.h`
 
@@ -329,7 +329,7 @@ Prompt Router Architecture
 
 The AI layer is built around the Prompt Router (ai/prompt_router.h), which provides a flexible abstraction for communicating with multiple AI backends:
 
-![NeuroHTTP Architecture Diagram](video/0.png)
+![NeuroHTTP Architecture Diagram](NeuroHTTP/video/0.png)
 
 * Supports dynamic routing to different models
 
@@ -580,7 +580,7 @@ NeuroHTTP demonstrates superior performance for AI-native workloads compared to 
 
 (Benchmarks to be included here as in previous Performance Comparison section)
 
-![NeuroHTTP Architecture Diagram](videos/neurohttp_2.png)
+![NeuroHTTP Architecture Diagram](NeuroHTTP/video/neurohttp_2.png)
 
 ---
 
@@ -649,7 +649,7 @@ The NeuroHTTP server implements a sophisticated multi-threaded epoll-based event
 ## Architecture Overview
 The event loop architecture follows a producer-consumer pattern with a main thread accepting connections and distributing them across worker threads. Each worker thread operates its own epoll instance using edge-triggered mode, allowing the server to scale efficiently across multiple CPU cores while maintaining low latency.
 
-![NeuroHTTP Architecture Diagram](videos/arch2.png)
+![NeuroHTTP Architecture Diagram](NeuroHTTP/video/arch2.png)
 
 The Server structure maintains an array of epoll file descriptors (epoll_fds), one per worker thread, enabling parallel event processing across threads.
 

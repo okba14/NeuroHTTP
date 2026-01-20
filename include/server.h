@@ -17,6 +17,7 @@ typedef struct {
     int active_connections;     
     int *epoll_fds;            
     pthread_t thread;          
+    pthread_t reaper_thread;    
     volatile sig_atomic_t running; 
     struct {
         uint64_t total_requests;

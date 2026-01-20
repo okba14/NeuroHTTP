@@ -3,6 +3,10 @@
 #define MAX_EVENTS 1024   
 #define BACKLOG 128       
 
+// ===== Configuration Constants =====
+#define KEEP_ALIVE_TIMEOUT 30     // Close connections idle for 30 seconds
+#define CLEANUP_INTERVAL 5        // Check for idle connections every 5 seconds
+
 // ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,11 +41,13 @@ typedef struct {
     FirewallStats firewall_stats;  
 } ThreadData;
 
-// Connection tracking structure
+// Connection tracking structure (UPDATED for Keep-Alive)
 typedef struct {
     int client_fd;
+    int epoll_owner_id; 
     char ip_address[INET_ADDRSTRLEN];
     time_t connection_time;
+    time_t last_activity; 
     uint64_t bytes_received;
     uint64_t bytes_sent;
     int requests_handled;
@@ -55,7 +61,7 @@ static int connection_capacity = 0;
 static pthread_mutex_t connection_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // ===== Helper Functions =====
-static ConnectionInfo *add_connection_info(int client_fd, const char *ip_address) {
+static ConnectionInfo *add_connection_info(int client_fd, const char *ip_address, int thread_id) {
     pthread_mutex_lock(&connection_mutex);
     
     if (connection_count >= connection_capacity) {
@@ -70,11 +76,14 @@ static ConnectionInfo *add_connection_info(int client_fd, const char *ip_address
         connection_capacity = new_capacity;
     }
     
+    time_t now = time(NULL);
     ConnectionInfo *info = &connections[connection_count];
     info->client_fd = client_fd;
+    info->epoll_owner_id = thread_id;
     strncpy(info->ip_address, ip_address, INET_ADDRSTRLEN - 1);
     info->ip_address[INET_ADDRSTRLEN - 1] = '\0';
-    info->connection_time = time(NULL);
+    info->connection_time = now;
+    info->last_activity = now; 
     info->bytes_received = 0;
     info->bytes_sent = 0;
     info->requests_handled = 0;
@@ -282,6 +291,51 @@ static int contains_attack_pattern(const char *data, const char *pattern) {
     return 0;
 }
 
+// ===== Reaper Thread for Idle Connections (NEW) =====
+static void *reaper_thread(void *arg) {
+    Server *server = (Server *)arg;
+    printf("[REAPER] Idle connection monitor started (Timeout: %ds)\n", KEEP_ALIVE_TIMEOUT);
+
+    while (server->running) {
+        sleep(CLEANUP_INTERVAL);
+        
+        pthread_mutex_lock(&connection_mutex);
+        time_t now = time(NULL);
+        
+        // Iterate backwards to safely remove elements
+        for (int i = connection_count - 1; i >= 0; i--) {
+            ConnectionInfo *info = &connections[i];
+            
+            if (now - info->last_activity > KEEP_ALIVE_TIMEOUT) {
+                printf("[REAPER] Closing idle connection: FD=%d, IP=%s (Idle: %lds)\n", 
+                       info->client_fd, info->ip_address, now - info->last_activity);
+                
+                // Remove from epoll 
+                if (info->epoll_owner_id >= 0 && info->epoll_owner_id < server->thread_count) {
+                    int target_epoll = server->epoll_fds[info->epoll_owner_id];
+                    epoll_ctl(target_epoll, EPOLL_CTL_DEL, info->client_fd, NULL);
+                }
+                
+                close(info->client_fd);
+                server->active_connections--; 
+                
+                // Remove from array (swap with last)
+                if (i < connection_count - 1) {
+                    connections[i] = connections[connection_count - 1];
+                }
+                connection_count--;
+                
+                i++; 
+            }
+        }
+        
+        pthread_mutex_unlock(&connection_mutex);
+    }
+    
+    printf("[REAPER] Idle connection monitor stopped\n");
+    return NULL;
+}
+
 // ===== Worker Thread Function =====
 static void *worker_thread(void *arg) {
     ThreadData *data = (ThreadData *)arg;
@@ -296,7 +350,7 @@ static void *worker_thread(void *arg) {
         int event_count = epoll_wait(data->epoll_fd, events, MAX_EVENTS, 100);
         
         if (event_count < 0) {
-            if (errno == EINTR) continue;  // Interrupted by signal
+            if (errno == EINTR) continue;  
             perror("epoll_wait");
             break;
         }
@@ -311,27 +365,38 @@ static void *worker_thread(void *arg) {
                     // Error handling request, close connection
                     epoll_ctl(data->epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
                     close(client_fd);
-                    server->active_connections--;
                     
-                    // Log connection closure
-                    ConnectionInfo *info = find_connection_info(client_fd);
-                    if (info) {
-                        log_connection_info(info, "closed");
-                        remove_connection_info(client_fd);
+                    // Critical Section: Update active connections safely
+                    pthread_mutex_lock(&connection_mutex);
+                    server->active_connections--;
+                    // Remove from tracking
+                    for (int j = 0; j < connection_count; j++) {
+                        if (connections[j].client_fd == client_fd) {
+                             // Swap and pop
+                             if (j < connection_count - 1) connections[j] = connections[connection_count - 1];
+                             connection_count--;
+                             break;
+                        }
                     }
+                    pthread_mutex_unlock(&connection_mutex);
                 }
             } else if (events[i].events & (EPOLLHUP | EPOLLERR)) {
                 // Connection error or closed
                 epoll_ctl(data->epoll_fd, EPOLL_CTL_DEL, client_fd, NULL);
                 close(client_fd);
-                server->active_connections--;
                 
-                // Log connection closure
-                ConnectionInfo *info = find_connection_info(client_fd);
-                if (info) {
-                    log_connection_info(info, "error");
-                    remove_connection_info(client_fd);
+                pthread_mutex_lock(&connection_mutex);
+                server->active_connections--;
+                 // Remove from tracking
+                for (int j = 0; j < connection_count; j++) {
+                    if (connections[j].client_fd == client_fd) {
+                         // Swap and pop
+                         if (j < connection_count - 1) connections[j] = connections[connection_count - 1];
+                         connection_count--;
+                         break;
+                    }
                 }
+                pthread_mutex_unlock(&connection_mutex);
             }
         }
     }
@@ -348,13 +413,13 @@ int server_init(Server *server, const Config *config) {
     server->port = config->port;
     server->thread_count = config->thread_count;
     server->max_connections = config->max_connections;
-    server->running = 0; // Initially not running
+    server->running = 0; 
     
     // Initialize statistics
     server->stats.total_requests = 0;
     server->stats.total_responses = 0;
     server->stats.bytes_sent = 0;
-    server->stats.bytes_received = 0; // Initialize this
+    server->stats.bytes_received = 0; 
     server->stats.avg_response_time = 0.0;
     
     // Create server socket
@@ -474,6 +539,11 @@ int server_start(Server *server) {
             continue;
         }
     }
+
+    // Start Reaper Thread (Keep-Alive Monitor)
+    if (pthread_create(&server->reaper_thread, NULL, reaper_thread, server) != 0) {
+        perror("pthread_create reaper");
+    }
     
     return 0;
 }
@@ -484,7 +554,10 @@ int server_stop(Server *server) {
     // Set running flag to false to signal threads to stop
     server->running = 0;
     
-    // Wait for threads to finish
+    // Join Reaper Thread
+    pthread_join(server->reaper_thread, NULL);
+
+    // Wait for worker threads to finish
     for (int i = 0; i < server->thread_count; i++) {
         pthread_join(((pthread_t *)server->thread_pool)[i], NULL);
         
@@ -558,20 +631,21 @@ int server_process_events(Server *server) {
             continue;
         }
         
-        // Add connection tracking
-        ConnectionInfo *info = add_connection_info(client_fd, client_ip);
+        // Distribute connection to one of threads
+        int thread_id = server->active_connections % server->thread_count;
+        
+        // Add connection tracking (pass thread_id)
+        ConnectionInfo *info = add_connection_info(client_fd, client_ip, thread_id);
         if (!info) {
             printf("Failed to track connection - rejecting: %s\n", client_ip);
             close(client_fd);
             continue;
         }
         
-        // Distribute connection to one of the threads
-        int thread_id = server->active_connections % server->thread_count;
         int epoll_fd = server->epoll_fds[thread_id];
         
         struct epoll_event event;
-        event.events = EPOLLIN | EPOLLET;  // Edge-triggered mode
+        event.events = EPOLLIN | EPOLLET;  
         event.data.fd = client_fd;
         
         if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event) < 0) {
@@ -593,37 +667,37 @@ int server_process_events(Server *server) {
 }
 
 int server_handle_request(Server *server, int client_fd) {
-    char buffer[8192];  // Increased buffer size for better security
+    char buffer[8192];  
     ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
     
     if (bytes_read <= 0) {
-        printf("DEBUG: No data received or connection closed\n");
-        return -1;  // Error or connection closed
+        // Connection closed by client or error
+        return -1;  
     }
     
-    buffer[bytes_read] = '\0';  // Ensure that string is null-terminated
+    buffer[bytes_read] = '\0';  
     
-    // === FIX: Track bytes received in server stats ===
+    // Track bytes received in server stats
     server->stats.bytes_received += bytes_read;
-    
-    printf("DEBUG: Received request:\n%s\n", buffer);
     
     // Get connection info
     ConnectionInfo *info = find_connection_info(client_fd);
-    if (info) {
-        info->bytes_received += bytes_read;
-        info->requests_handled++;
+    if (!info) {
+        return -1; 
     }
+
+    // Update activity timestamp (Keep-Alive reset)
+    info->bytes_received += bytes_read;
+    info->requests_handled++;
+    info->last_activity = time(NULL); 
     
     // Parse request
     HTTPRequest request;
     if (parse_http_request(buffer, &request) != 0) {
-        printf("DEBUG: Failed to parse HTTP request\n");
-        
         // Check for firewall attack patterns in raw request - only high severity patterns
-        if (info && (contains_attack_pattern(buffer, "<script") || 
-                     contains_attack_pattern(buffer, "javascript:") ||
-                     contains_attack_pattern(buffer, "eval("))) {
+        if (contains_attack_pattern(buffer, "<script") || 
+            contains_attack_pattern(buffer, "javascript:") ||
+            contains_attack_pattern(buffer, "eval(")) {
             printf("Connection blocked by firewall - attack pattern detected\n");
             info->flagged_suspicious = 1;
             log_connection_info(info, "blocked");
@@ -631,18 +705,16 @@ int server_handle_request(Server *server, int client_fd) {
         }
         
         // Error parsing request
-        const char *error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
+        const char *error_response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         send(client_fd, error_response, strlen(error_response), 0);
         return -1;
     }
     
-    printf("DEBUG: Parsed request - Method: %d, Path: %s\n", request.method, request.path);
-    
     // Extract API key for potential future use
-    (void)extract_api_key(&request);  // Cast to void to avoid unused variable warning
+    (void)extract_api_key(&request);  
     
     // Check firewall with basic detection - only for blacklisted IPs
-    if (info && firewall_is_blacklisted(info->ip_address)) {
+    if (firewall_is_blacklisted(info->ip_address)) {
         printf("Connection blocked by firewall - IP blacklisted\n");
         info->flagged_suspicious = 1;
         log_connection_info(info, "blocked");
@@ -651,7 +723,7 @@ int server_handle_request(Server *server, int client_fd) {
     }
     
     // Check for suspicious request patterns
-    if (info && is_suspicious_request(&request)) {
+    if (is_suspicious_request(&request)) {
         printf("Suspicious request detected from %s\n", info->ip_address);
         info->flagged_suspicious = 1;
         
@@ -669,7 +741,6 @@ int server_handle_request(Server *server, int client_fd) {
     if (request.content_type && strstr(request.content_type, "application/json")) {
         JSONValue json_result;
         if (parse_json_with_fast_tokenizer(request.body, request.body_length, &json_result) == 0) {
-            printf("DEBUG: JSON parsed successfully using fast tokenizer\n");
             // You can use the parsed JSON here
             free(json_result.key);
             free(json_result.value.str);
@@ -679,53 +750,85 @@ int server_handle_request(Server *server, int client_fd) {
     // Route request
     RouteResponse response;
     
-    // === FIX: Pass server pointer to route_request ===
     if (route_request(server, &request, &response) != 0) {
-        printf("DEBUG: Failed to route request\n");
         // Error routing
-        const char *error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+        const char *error_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         send(client_fd, error_response, strlen(error_response), 0);
         free_http_request(&request);
         return -1;
     }
     
-    printf("DEBUG: Route response - Length: %zu, Is streaming: %d\n", response.length, response.is_streaming);
-    printf("DEBUG: Response data (first 200 bytes): %.*s\n", (int)(response.length > 200 ? 200 : response.length), response.data);
-    
-    // Send response
-    if (response.is_streaming) {
-        // Streaming response
-        printf("DEBUG: Sending streaming response\n");
-        stream_response(client_fd, &response);
-    } else {
-        // Normal response
-        printf("DEBUG: Sending normal response\n");
+    // Keep-Alive Logic (FIXED)
+    int keep_alive = 0;
+    // Check if client requested Keep-Alive
+    char *conn_header = get_header_value(&request, "Connection");
+    if (conn_header && strstr(conn_header, "keep-alive")) {
+        keep_alive = 1;
+    }
+
+    // If client wants keep-alive AND response is OK, patch the response header
+    if (keep_alive && response.status_code == 200) {
+        // Router typically sets "Connection: close". We need to patch it.
+        char *conn_close_ptr = strstr(response.data, "Connection: close");
+        if (conn_close_ptr) {
+            // FIX: Realloc to expand buffer to prevent heap corruption
+            // "Connection: close" (17 bytes) -> "Connection: keep-alive" (22 bytes)
+            // We need 5 extra bytes.
+            ptrdiff_t offset = conn_close_ptr - response.data; // Save offset before realloc
+            
+            char *new_data = realloc(response.data, response.length + 5);
+            if (new_data) {
+                response.data = new_data;
+                conn_close_ptr = new_data + offset; // Update pointer after realloc
+                
+                // Move the rest of the string to the right by 5 bytes
+                memmove(conn_close_ptr + 22, conn_close_ptr + 17, strlen(conn_close_ptr + 17) + 1);
+                memcpy(conn_close_ptr, "Connection: keep-alive", 22);
+                response.length += 5; // Update length
+            } else {
+                // Realloc failed, fallback to close
+                keep_alive = 0;
+            }
+        }
+        
+        // Send response
         send(client_fd, response.data, response.length, 0);
+        
+        // Update Stats
+        server->stats.total_requests++;
+        server->stats.total_responses++;
+        server->stats.bytes_sent += response.length;
+        if (info) info->bytes_sent += response.length;
+
+        // Free memory but DO NOT close socket (Return 0)
+        free_http_request(&request);
+        free_route_response(&response);
+        
+        return 0; // Keep connection alive!
+    } 
+    else {
+        // Normal behavior: Close connection
+        if (response.is_streaming) {
+            stream_response(client_fd, &response);
+        } else {
+            send(client_fd, response.data, response.length, 0);
+        }
+        
+        // Update statistics
+        server->stats.total_requests++;
+        server->stats.total_responses++;
+        server->stats.bytes_sent += response.length;
+        
+        if (info) {
+            info->bytes_sent += response.length;
+        }
+        
+        // Free request and response memory
+        free_http_request(&request);
+        free_route_response(&response);
+        
+        return -1; // Signal to worker thread to close connection
     }
-    
-    // Update statistics
-    server->stats.total_requests++;
-    server->stats.total_responses++;
-    server->stats.bytes_sent += response.length;
-    
-    if (info) {
-        info->bytes_sent += response.length;
-    }
-    
-    // Calculate average response time
-    if (info) {
-        time_t now = time(NULL);
-        double response_time = difftime(now, info->connection_time);
-        server->stats.avg_response_time = 
-            (server->stats.avg_response_time * (server->stats.total_requests - 1) + response_time) / 
-            server->stats.total_requests;
-    }
-    
-    // Free request and response memory
-    free_http_request(&request);
-    free_route_response(&response);
-    
-    return 0;
 }
 
 int server_send_response(Server *server, int client_fd, const char *response, size_t length) {
@@ -741,6 +844,7 @@ int server_send_response(Server *server, int client_fd, const char *response, si
     ConnectionInfo *info = find_connection_info(client_fd);
     if (info) {
         info->bytes_sent += bytes_sent;
+        info->last_activity = time(NULL); 
     }
     
     return 0;

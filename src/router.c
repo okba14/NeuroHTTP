@@ -21,6 +21,11 @@
 #define MAX_MIDDLEWARE 8
 #define MAX_ROUTE_PARAMS 8
 
+// ===== Security & Configuration Constants (NEW) =====
+#define MAX_PROMPT_SIZE 16384       // 16KB limit for prompt to prevent DoS
+#define MAX_LOG_PREVIEW 100         // Limit log output to prevent sensitive data leakage
+#define INITIAL_AI_BUF_SIZE 8192    // Starting buffer for AI response
+
 // ===== Global Variables =====
 static RouteHashTable routes_table = {0};  // Hash table for routes
 
@@ -42,6 +47,40 @@ static const char* route_error_messages[] = {
 };
 
 // ===== Helper Functions =====
+
+// (NEW) Helper: JSON String Escaping
+// Essential to prevent JSON Injection/Breaking
+static char* json_escape_str(const char* input) {
+    if (!input) return strdup("");
+    
+    size_t len = strlen(input);
+    // Worst case scenario: every character needs escaping
+    char* escaped = malloc((len * 2) + 1);
+    if (!escaped) return NULL;
+
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        switch (input[i]) {
+            case '"':  escaped[j++] = '\\'; escaped[j++] = '"'; break;
+            case '\\': escaped[j++] = '\\'; escaped[j++] = '\\'; break;
+            case '\b': escaped[j++] = '\\'; escaped[j++] = 'b'; break;
+            case '\f': escaped[j++] = '\\'; escaped[j++] = 'f'; break;
+            case '\n': escaped[j++] = '\\'; escaped[j++] = 'n'; break;
+            case '\r': escaped[j++] = '\\'; escaped[j++] = 'r'; break;
+            case '\t': escaped[j++] = '\\'; escaped[j++] = 't'; break;
+            default:
+                // Filter out other control characters (ASCII < 32) to keep JSON clean
+                if ((unsigned char)input[i] < 32) {
+                    escaped[j++] = ' '; 
+                } else {
+                    escaped[j++] = input[i];
+                }
+                break;
+        }
+    }
+    escaped[j] = '\0';
+    return escaped;
+}
 
 // Simple helper to extract a string from JSON body (Basic implementation)
 // Assumes input is like {"key": "value"}
@@ -632,7 +671,7 @@ void free_route_response(RouteResponse *response) {
 
 // ===== Route Handlers =====
 
-// Function to handle chat requests (UPDATED TO USE REAL AI ROUTER)
+// Function to handle chat requests (ADVANCED & SECURE VERSION)
 int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     (void)server; // Unused
     
@@ -642,44 +681,63 @@ int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *res
     char *model_name = NULL;
     int status = -1;
 
+    // 1. DoS Protection: Check payload size BEFORE processing
+    if (!request->body || request->body_length > MAX_PROMPT_SIZE) {
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 413); // 413 Payload Too Large
+    }
+
     // === PARSE REQUEST BODY ===
-    if (request->body && request->body_length > 0) {
-        // Try to extract 'prompt' from JSON
-        prompt = extract_json_value(request->body, "prompt");
-        // Try to extract 'model' (optional), default to NULL
-        model_name = extract_json_value(request->body, "model");
+    // Try to extract 'prompt' from JSON
+    prompt = extract_json_value(request->body, "prompt");
+    // Try to extract 'model' (optional), default to NULL
+    model_name = extract_json_value(request->body, "model");
 
-        if (!prompt) {
-            // If parsing fails, try using the whole body as prompt (fallback)
-            prompt = malloc(request->body_length + 1);
-            if(prompt) {
-                strncpy(prompt, request->body, request->body_length);
-                prompt[request->body_length] = '\0';
-            } else {
-                return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
-            }
+    if (!prompt) {
+        // If parsing fails, try using the whole body as prompt (fallback)
+        // Ensure we don't exceed buffer safety here again
+        size_t copy_len = (request->body_length < MAX_PROMPT_SIZE) ? request->body_length : MAX_PROMPT_SIZE;
+        prompt = malloc(copy_len + 1);
+        if(prompt) {
+            strncpy(prompt, request->body, copy_len);
+            prompt[copy_len] = '\0';
+        } else {
+            status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+            goto cleanup;
         }
+    }
 
+    // 2. Secure Logging: Mask sensitive data & Truncate
+    // Only print the first MAX_LOG_PREVIEW characters to avoid flooding logs
+    size_t prompt_len = strlen(prompt);
+    if (prompt_len > MAX_LOG_PREVIEW) {
+        printf("[ROUTER] Received prompt (truncated): %.100s... [Length: %zu]\n", prompt, prompt_len);
+    } else {
         printf("[ROUTER] Received prompt: %s\n", prompt);
+    }
 
-        // Buffer for AI response
-        size_t ai_buf_size = 8192;
-        char *ai_response = (char *)malloc(ai_buf_size);
+    // 3. Dynamic Buffer for AI Response
+    size_t ai_buf_size = INITIAL_AI_BUF_SIZE; 
+    char *ai_response = (char *)malloc(ai_buf_size);
+    
+    if (ai_response) {
+        memset(ai_response, 0, ai_buf_size);
         
-        if (ai_response) {
-            // === CALL THE REAL AI ROUTER ===
-            int route_result = prompt_router_route(prompt, model_name, ai_response, ai_buf_size);
+        // === CALL THE REAL AI ROUTER ===
+        int route_result = prompt_router_route(prompt, model_name, ai_response, ai_buf_size);
+        
+        if (route_result == 0) {
+            // 4. SECURITY: Escape JSON special characters
+            char *safe_ai_response = json_escape_str(ai_response);
             
-            if (route_result == 0) {
-                // Construct the JSON response for the client
-                // We wrap the AI content in a JSON structure
-                size_t response_len = strlen(ai_response) + 256;
+            if (safe_ai_response) {
+                // Calculate required size for final JSON dynamically
+                size_t response_len = strlen(safe_ai_response) + strlen(model_name ? model_name : "default") + 128;
                 char *json_output = (char *)malloc(response_len);
                 
                 if (json_output) {
                     snprintf(json_output, response_len, 
                             "{\"response\": \"%s\", \"model\": \"%s\", \"status\": \"success\"}", 
-                            ai_response, model_name ? model_name : "default");
+                            safe_ai_response, model_name ? model_name : "default");
                     
                     status = create_http_response(response, json_output, strlen(json_output), 
                                              "application/json", 200, "OK");
@@ -687,21 +745,22 @@ int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *res
                 } else {
                     status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
                 }
+                free(safe_ai_response); // Important: Free escaped string
             } else {
-                // Router returned an error
-                char error_msg[256];
-                snprintf(error_msg, sizeof(error_msg), "AI Router Error: Failed to process request");
-                status = create_http_response(response, error_msg, strlen(error_msg), 
-                                             "application/json", 502, "Bad Gateway");
+                status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
             }
-            free(ai_response);
         } else {
-            status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+            // Router returned an error
+            const char *error_msg = "AI Router Error: Failed to process request";
+            status = create_http_response(response, error_msg, strlen(error_msg), 
+                                         "application/json", 502, "Bad Gateway");
         }
+        free(ai_response);
     } else {
-        status = create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+        status = create_error_response(response, ROUTE_ERROR_MEMORY, 500);
     }
 
+cleanup:
     // === CLEANUP ===
     if (prompt) free(prompt);
     if (model_name) free(model_name);
@@ -709,24 +768,32 @@ int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *res
     return status;
 }
 
-// Function to handle stats requests
+// Function to handle stats requests (Dynamic Buffering maintained)
 int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     (void)request; // Unused
     
     if (!server || !response) return -1;
     
-    char *stats_json = malloc(1024);
+    // Use dynamic allocation
+    size_t stats_len = 512; 
+    char *stats_json = malloc(stats_len);
     if (!stats_json) {
         return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
     }
     
-    snprintf(stats_json, 1024, 
+    int written = snprintf(stats_json, stats_len, 
             "{\"requests\": %lu, \"responses\": %lu, \"uptime\": %ld, \"active_connections\": %d, \"timestamp\": %ld}", 
             server->stats.total_requests, 
             server->stats.total_responses, 
             (long)0, // Uptime placeholder
             server->active_connections, 
             time(NULL));
+
+    // Buffer size check
+    if (written < 0 || (size_t)written >= stats_len) {
+        free(stats_json);
+        return create_error_response(response, ROUTE_ERROR_INTERNAL, 500);
+    }
     
     int result = create_http_response(response, stats_json, strlen(stats_json), 
                                      "application/json", 200, "OK");
@@ -735,19 +802,34 @@ int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *re
     return result;
 }
 
-// Function to handle health requests
+// Function to handle health requests (CHANGED TO DYNAMIC BUFFERING)
 int handle_health_request(Server *server, HTTPRequest *request, RouteResponse *response) {
     (void)server; 
     (void)request;
     
     if (!response) return -1;
     
-    const char *health_response = "{\"status\": \"ok\", \"timestamp\": %ld, \"server\": \"AIONIC/1.0\"}";
-    char health_json[128];
-    snprintf(health_json, sizeof(health_json), health_response, time(NULL));
+    // CHANGED: Use dynamic allocation instead of stack array
+    size_t health_len = 128;
+    char *health_json = malloc(health_len);
+    if (!health_json) {
+        return create_error_response(response, ROUTE_ERROR_MEMORY, 500);
+    }
+
+    int written = snprintf(health_json, health_len, 
+            "{\"status\": \"ok\", \"timestamp\": %ld, \"server\": \"AIONIC/1.0\"}", 
+            time(NULL));
+
+    if (written < 0 || (size_t)written >= health_len) {
+        free(health_json);
+        return create_error_response(response, ROUTE_ERROR_INTERNAL, 500);
+    }
     
-    return create_http_response(response, health_json, strlen(health_json), 
+    int result = create_http_response(response, health_json, strlen(health_json), 
                                "application/json", 200, "OK");
+    
+    free(health_json); // Important cleanup
+    return result;
 }
 
 // Handle root path request

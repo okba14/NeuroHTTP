@@ -649,7 +649,7 @@ The NeuroHTTP server implements a sophisticated multi-threaded epoll-based event
 ## Architecture Overview
 The event loop architecture follows a producer-consumer pattern with a main thread accepting connections and distributing them across worker threads. Each worker thread operates its own epoll instance using edge-triggered mode, allowing the server to scale efficiently across multiple CPU cores while maintaining low latency.
 
-![NeuroHTTP Architecture Diagram](../video/arch2.png)
+![NeuroHTTP Architecture Diagram](../videos/arch2.png)
 
 The Server structure maintains an array of epoll file descriptors (epoll_fds), one per worker thread, enabling parallel event processing across threads.
 

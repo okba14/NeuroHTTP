@@ -13,6 +13,12 @@
 </p>
 
 <p align="center">
+  <img src="videos/0.png" width="220"/>
+  <img src="videos/2.png" width="220"/>
+  <img src="videos/3.png" width="220"/>
+</p>
+
+<p align="center">
   <a href="README.ar.md"><strong>📖 Arabic Version — النسخة العربية</strong></a>
 </p>
 

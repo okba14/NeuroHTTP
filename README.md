@@ -84,19 +84,19 @@
 | Provider | Models | Endpoint |
 |----------|--------|----------|
 | **Groq** 🆓 | Llama 3.3 70B, Llama 3.1 8B, Gemma 2 9B, Mixtral 8×7B, DeepSeek R1, Qwen QWQ 32B | `api.groq.com` |
-| **OpenAI** 💰 | GPT-4o, GPT-4o-mini, GPT-4 Turbo, o3-mini | `api.openai.com` |
-| **Anthropic** 💰 | Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus | `api.anthropic.com` |
-| **Google Gemini** 💰 | Gemini 2.0 Flash, Gemini 1.5 Pro | `generativelanguage.googleapis.com` |
-| **DeepSeek** 💰 | DeepSeek Chat, DeepSeek Reasoner | `api.deepseek.com` |
-| **Moonshot/Kimi** 💰 | Moonshot v1 8K, Moonshot v1 32K | `api.moonshot.cn` |
-| **Zhipu (GLM)** 💰 | GLM-4-Plus, GLM-4-Flash | `open.bigmodel.cn` |
-| **Perplexity** 💰 | Sonar Pro, Sonar Deep Research | `api.perplexity.ai` |
-| **Mistral AI** 💰 | Mistral Large, Mistral Small | `api.mistral.ai` |
+| **OpenAI**  | GPT-4o, GPT-4o-mini, GPT-4 Turbo, o3-mini | `api.openai.com` |
+| **Anthropic**  | Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus | `api.anthropic.com` |
+| **Google Gemini**  | Gemini 2.0 Flash, Gemini 1.5 Pro | `generativelanguage.googleapis.com` |
+| **DeepSeek**  | DeepSeek Chat, DeepSeek Reasoner | `api.deepseek.com` |
+| **Moonshot/Kimi**  | Moonshot v1 8K, Moonshot v1 32K | `api.moonshot.cn` |
+| **Zhipu (GLM)**  | GLM-4-Plus, GLM-4-Flash | `open.bigmodel.cn` |
+| **Perplexity**  | Sonar Pro, Sonar Deep Research | `api.perplexity.ai` |
+| **Mistral AI**  | Mistral Large, Mistral Small | `api.mistral.ai` |
 | **Local Ollama** 🆓 | Any local model via Ollama | `localhost:11434` |
 
 ---
 
-## 📦 Prerequisites
+##  Prerequisites
 
 ```bash
 # Ubuntu / Debian
@@ -272,7 +272,7 @@ export $(grep -v '^#' .env | xargs) && ./bin/aionic
 
 ---
 
-## 🧠 Adding AI Models
+##  Adding AI Models
 
 Models are defined in `config/aionic.conf` using this format:
 

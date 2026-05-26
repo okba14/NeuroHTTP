@@ -425,12 +425,20 @@ int stats_save() {
 void stats_cleanup() {
     pthread_mutex_lock(&global_stats.mutex);
     
-    // Save final stats
-    save_stats_to_file(global_stats.stats_file);
-    
     // Free model memory
     for (int i = 0; i < global_stats.model_count; i++) {
         free(global_stats.model_stats[i].model_name);
+    }
+    
+    FILE *file = global_stats.stats_file ? fopen(global_stats.stats_file, "w") : NULL;
+    if (file) {
+        fprintf(file, "{\n  \"models\": [\n");
+        for (int i = 0; i < global_stats.model_count; i++) {
+            ModelStats *st = &global_stats.model_stats[i];
+            fprintf(file, "    {\"model_name\":\"%s\",\"total_requests\":%lu,\"successful_requests\":%lu,\"failed_requests\":%lu,\"avg_response_time\":%.2f}\n", st->model_name, st->total_requests, st->successful_requests, st->failed_requests, st->avg_response_time);
+        }
+        fprintf(file, "  ]\n}\n");
+        fclose(file);
     }
     
     free(global_stats.model_stats);

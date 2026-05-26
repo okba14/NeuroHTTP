@@ -84,6 +84,7 @@ void stream_cleanup(StreamData *stream);
 // Enhanced stream functions
 int stream_init_ex(StreamData *stream, int client_fd, const StreamConfig *config);
 int stream_send_chunk_ex(StreamData *stream, const char *data, size_t length, uint32_t timeout_ms);
+int stream_send_sse(StreamData *stream, const char *event, const char *data, size_t data_len);
 StreamResult stream_send_with_callback(StreamData *stream, const char *data, size_t length, 
                                      StreamDataCallback callback, void* user_data);
 void stream_get_stats(const StreamData *stream, StreamStats *stats);

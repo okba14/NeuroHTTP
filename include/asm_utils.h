@@ -49,6 +49,19 @@ void *memcpy_asm(void *dest, const void *src, size_t n);
 void *memcpy_asm_avx2(void *dest, const void *src, size_t n);
 void *memcpy_asm_avx512(void *dest, const void *src, size_t n);
 
+/* Auto-dispatch: picks best implementation at runtime */
+static inline void *memcpy_dispatch(void *dest, const void *src, size_t n) {
+    extern cpu_features_t cpu_features;
+    if (cpu_features.avx512) return memcpy_asm_avx512(dest, src, n);
+    if (cpu_features.avx2)    return memcpy_asm_avx2(dest, src, n);
+    return memcpy_asm(dest, src, n);
+}
+
+/* For overlapping copies, use libc memmove (can't SIMD safely with overlap) */
+static inline void *memmove_dispatch(void *dest, const void *src, size_t n) {
+    return memmove(dest, src, n);
+}
+
 /* ============================================================
  *  Runtime Capability Queries
  * ============================================================ */

@@ -63,6 +63,7 @@ typedef struct {
 
 
 int parse_http_request(const char *raw_request, HTTPRequest *request);
+int parse_http_request_dynamic(const char *raw_request, size_t raw_len, HTTPRequest *request);
 void free_http_request(HTTPRequest *request);
 
 // === FIXED HERE ===

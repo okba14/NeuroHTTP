@@ -123,7 +123,7 @@ int tokenize_text_optimized(const char *text, size_t length, Token *tokens, size
         return -1;
     }
     
-    memcpy_asm(text_copy, text, length);
+    memcpy_dispatch(text_copy, text, length);
     text_copy[length] = '\0';
     
     // Simple tokenization - in a real implementation, this would be more complex

@@ -273,7 +273,7 @@ char *pool_strdup(string_pool_t *pool, const char *str) {
     }
     
     char *result = pool->buffer + pool->used;
-    memcpy(result, str, len);
+    memcpy_dispatch(result, str, len);
     pool->used += len;
     
     return result;
@@ -328,11 +328,11 @@ char *str_replace_ex(const char *orig, const char *rep, const char *with, string
         const char *match = strstr(src, rep);
         size_t len_front = match - src;
         
-        memcpy(dst, src, len_front);
+        memcpy_dispatch(dst, src, len_front);
         dst += len_front;
         
         if (len_with > 0) {
-            memcpy(dst, with, len_with);
+            memcpy_dispatch(dst, with, len_with);
             dst += len_with;
         }
         

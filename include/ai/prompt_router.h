@@ -1,76 +1,80 @@
 #ifndef AIONIC_AI_PROMPT_ROUTER_H
 #define AIONIC_AI_PROMPT_ROUTER_H
 
-/**
- * Initializes the Prompt Router.
- * Loads default AI models and initializes the network library (libcurl).
- * 
- * @return 0 on success, -1 on failure.
- */
-int prompt_router_init();
+#include <stdint.h>
+#include "config.h"
 
-/**
- * Adds a new AI model to the routing table.
- * 
- * @param name The name of the model (e.g., "gpt-3.5-turbo").
- * @param api_endpoint The full URL of the API (e.g., "https://api.openai.com/v1/...").
- * @param max_tokens Maximum tokens for the response.
- * @param temperature Sampling temperature (0.0 to 1.0).
- * @return 0 on success, -1 on failure.
- */
-int prompt_router_add_model(const char *name, const char *api_endpoint, int max_tokens, float temperature);
+#define AI_TIER_FAST      1
+#define AI_TIER_BALANCED  2
+#define AI_TIER_REASONING 3
+#define AI_TIER_PREMIUM   4
 
-/**
- * Removes an AI model from the routing table by name.
- * 
- * @param name The name of the model to remove.
- * @return 0 on success, -1 if model not found.
- */
+typedef enum {
+    MODEL_STATE_HEALTHY = 0,
+    MODEL_STATE_DEGRADED,
+    MODEL_STATE_RATE_LIMITED,
+    MODEL_STATE_DECOMMISSIONED,
+    MODEL_STATE_QUARANTINED,
+    MODEL_STATE_DISABLED,
+    MODEL_STATE_MISSING_KEY
+} ModelState;
+
+typedef struct {
+    ModelState state;
+    int consecutive_failures;
+    int consecutive_successes;
+    time_t last_failure_time;
+    time_t last_success_time;
+    time_t quarantined_until;
+    int circuit_open;
+    time_t circuit_open_until;
+    int circuit_failures;
+    uint64_t circuit_window_start_us;
+} ModelHealth;
+
+typedef enum {
+    AI_ERROR_NONE = 0,
+    AI_ERROR_API_FAILURE,
+    AI_ERROR_TIMEOUT,
+    AI_ERROR_RATE_LIMIT,
+    AI_ERROR_DECOMMISSIONED,
+    AI_ERROR_AUTH,
+    AI_ERROR_INVALID_MODEL,
+    AI_ERROR_QUARANTINED,
+    AI_ERROR_CIRCUIT_OPEN,
+    AI_ERROR_MEMORY
+} AIErrorCode;
+
+typedef uint64_t CapabilityFlags;
+#define CAP_STREAMING    (1 << 0)
+#define CAP_VISION       (1 << 1)
+#define CAP_TOOL_USE     (1 << 2)
+#define CAP_REASONING    (1 << 3)
+#define CAP_JSON_MODE    (1 << 4)
+#define CAP_FUNCTION_CALL (1 << 5)
+
+typedef struct {
+    uint64_t total_input_tokens;
+    uint64_t total_output_tokens;
+    uint64_t total_cost_usd;  // micro-dollars
+    uint64_t total_requests;
+    uint64_t total_errors;
+} TokenAccount;
+
+int prompt_router_init(void);
+int prompt_router_init_with_config(const Config *config);
+int prompt_router_add_model(const char *name, const char *api_endpoint, const char *api_key_env, int max_tokens, float temperature, int tier);
+int prompt_router_add_model_ex(const char *name, const char *api_endpoint, const char *api_key_env, int max_tokens, float temperature, int tier, CapabilityFlags caps);
 int prompt_router_remove_model(const char *name);
-
-/**
- * Sets the default AI model to be used when no specific model is requested.
- * 
- * @param name The name of the model to set as default.
- * @return 0 on success, -1 if model not found.
- */
 int prompt_router_set_default_model(const char *name);
-
-/**
- * Routes a user prompt to the specified AI model (or default) and returns the response.
- * This function handles the actual HTTP request and JSON parsing internally.
- * 
- * @param prompt The input text prompt from the user.
- * @param model_name The specific model to use (NULL to use default).
- * @param response Buffer to store the AI's response.
- * @param response_size Size of the response buffer.
- * @return 0 on success, -1 on failure.
- */
-int prompt_router_route(const char *prompt, const char *model_name, char *response, size_t response_size);
-
-/**
- * Retrieves a list of names of all available AI models.
- * The caller is responsible for freeing the allocated memory.
- * 
- * @param model_names Pointer to an array of strings (output).
- * @param count Pointer to store the number of models.
- * @return 0 on success, -1 on failure.
- */
+int prompt_router_route(const char *prompt, const char *model_name, char *response, size_t response_size, char *actual_model, size_t actual_model_size);
 int prompt_router_get_models(char ***model_names, int *count);
-
-/**
- * Sets the availability status of a specific model.
- * 
- * @param name The name of the model.
- * @param is_available 1 if available, 0 if disabled.
- * @return 0 on success, -1 if model not found.
- */
+int prompt_router_get_available_count(void);
 int prompt_router_set_model_availability(const char *name, int is_available);
+int prompt_router_set_model_state(const char *name, ModelState state);
+int prompt_router_get_model_health(const char *name, ModelHealth *health);
+int prompt_router_get_token_account(TokenAccount *account);
+int prompt_router_hot_reload(void);
+void prompt_router_cleanup(void);
 
-/**
- * Cleans up the Prompt Router resources.
- * Frees memory and shuts down the network library.
- */
-void prompt_router_cleanup();
-
-#endif // AIONIC_AI_PROMPT_ROUTER_H
+#endif

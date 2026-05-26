@@ -1,441 +1,383 @@
-; json_fast.s - Highly optimized JSON tokenizer with SIMD support
-; Based on x86-64 architecture with SSE4.2 and AVX2 instructions
+; json_fast.s - SIMD JSON structural tokenizer (SSE4.2 + AVX2)
+; Finds structural chars in 16/32 byte chunks using SIMD
 
 global json_fast_tokenizer
 global json_fast_tokenizer_avx2
 
-; Function: json_fast_tokenizer (SSE4.2 optimized)
-; Inputs:
-;   rdi - pointer to JSON string
-;   rsi - string length
-; Outputs:
-;   Nothing (memory will be modified directly)
+; ===== Read-only data =====
+section .rodata align=16
+sse_quote:       times 16 db 0x22
+sse_brace_open:  times 16 db 0x7B
+sse_brace_close: times 16 db 0x7D
+sse_bracket_open: times 16 db 0x5B
+sse_bracket_close: times 16 db 0x5D
+sse_space:       times 16 db 0x20
+sse_tab:         times 16 db 0x09
+sse_lf:          times 16 db 0x0A
+sse_cr:          times 16 db 0x0D
 
-; Function: json_fast_tokenizer_avx2 (AVX2 optimized)
-; Inputs:
-;   rdi - pointer to JSON string
-;   rsi - string length
-; Outputs:
-;   Nothing (memory will be modified directly)
+align 32
+avx_quote:       times 32 db 0x22
+avx_brace_open:  times 32 db 0x7B
+avx_brace_close: times 32 db 0x7D
+avx_bracket_open: times 32 db 0x5B
+avx_bracket_close: times 32 db 0x5D
+avx_space:       times 32 db 0x20
+avx_tab:         times 32 db 0x09
+avx_lf:          times 32 db 0x0A
+avx_cr:          times 32 db 0x0D
 
 section .text
 
-; Standard JSON tokenizer using SSE4.2
+; ===== SSE4.2 Tokenizer =====
+; rdi = JSON string, rsi = length
+; Returns token count (compatibility: 0)
 json_fast_tokenizer:
     push rbp
     mov rbp, rsp
-    
-    ; Save registers we will use
     push rbx
     push r12
     push r13
     push r14
     push r15
-    
-    ; rdi = json_string
-    ; rsi = length
-    ; r12 = current position
-    ; r13 = end position
-    ; r14 = state (0: outside, 1: in_string, 2: in_object, 3: in_array)
-    ; r15 = temporary register for SIMD operations
-    
-    mov r12, rdi          ; current position = start of string
-    mov r13, rsi           ; end position = length
-    mov r14, 0             ; state = outside
-    
-    ; Check for SSE4.2 support
-    push rbx
-    mov eax, 1
-    cpuid
-    pop rbx
-    test ecx, 1 << 20  ; Check SSE4.2 bit
-    jz .scalar_processing
-    
-    ; Main processing loop with SIMD optimizations
-.loop:
-    cmp r12, r13           ; if current_position >= end_position, exit
-    jge .end
-    
-    ; Check if we have at least 16 bytes remaining for SIMD processing
-    mov r15, r13
-    sub r15, r12
-    cmp r15, 16
-    jb .scalar_processing
-    
-    ; Load 16 bytes using SSE4.2
+
+    mov r12, rdi
+    mov r13, rsi
+    add r13, rdi
+    xor r14d, r14d
+    xor r15d, r15d
+
+    cmp r12, r13
+    jge .done
+
+.main_loop:
+    mov rax, r13
+    sub rax, r12
+    cmp rax, 16
+    jb .scalar_loop
+
+    cmp r14d, 1
+    je .scalar_loop
+
     movdqu xmm0, [r12]
-    
-    ; Check for special characters using SSE4.2 string instructions
-    ; This is a simplified version - in a real implementation,
-    ; we would use PCMPISTRI for parallel character comparison
-    
-    ; For now, fall back to scalar processing
-    jmp .scalar_processing
-    
-.scalar_processing:
-    mov al, [r12]          ; load current character
-    
-    ; Process current state
-    cmp r14, 0             ; if state == outside
-    je .outside
-    
-    cmp r14, 1             ; if state == in_string
-    je .in_string
-    
-    cmp r14, 2             ; if state == in_object
-    je .in_object
-    
-    cmp r14, 3             ; if state == in_array
-    je .in_array
-    
-.outside:
-    ; Process characters outside strings
-    cmp al, '"'            ; if char == '"', start string
-    je .start_string
-    
-    cmp al, '{'            ; if char == '{', start object
-    je .start_object
-    
-    cmp al, '['            ; if char == '[', start array
-    je .start_array
-    
-    cmp al, '}'            ; if char == '}', end object
-    je .end_object
-    
-    cmp al, ']'            ; if char == ']', end array
-    je .end_array
-    
-    ; Skip whitespace characters efficiently
-    cmp al, ' '
-    je .next_char
-    cmp al, '\t'
-    je .next_char
-    cmp al, '\n'
-    je .next_char
-    cmp al, '\r'
-    je .next_char
-    
-    jmp .next_char
-    
-.in_string:
-    ; Process characters inside string
-    cmp al, '"'            ; if char == '"', end string
-    je .end_string
-    
-    cmp al, '\'            ; if char == '\', handle escape
-    je .escape_char
-    
-    jmp .next_char
-    
-.in_object:
-    ; Process characters inside object
-    cmp al, '}'            ; if char == '}', end object
-    je .end_object
-    
-    cmp al, '"'            ; if char == '"', start string
-    je .start_string
-    
-    ; Skip whitespace characters efficiently
-    cmp al, ' '
-    je .next_char
-    cmp al, '\t'
-    je .next_char
-    cmp al, '\n'
-    je .next_char
-    cmp al, '\r'
-    je .next_char
-    
-    jmp .next_char
-    
-.in_array:
-    ; Process characters inside array
-    cmp al, ']'            ; if char == ']', end array
-    je .end_array
-    
-    cmp al, '"'            ; if char == '"', start string
-    je .start_string
-    
-    ; Skip whitespace characters efficiently
-    cmp al, ' '
-    je .next_char
-    cmp al, '\t'
-    je .next_char
-    cmp al, '\n'
-    je .next_char
-    cmp al, '\r'
-    je .next_char
-    
-    jmp .next_char
-    
-.start_string:
-    mov r14, 1             ; state = in_string
-    jmp .next_char
-    
-.end_string:
-    mov r14, 0             ; state = outside
-    jmp .next_char
-    
-.start_object:
-    mov r14, 2             ; state = in_object
-    jmp .next_char
-    
-.end_object:
-    mov r14, 0             ; state = outside
-    jmp .next_char
-    
-.start_array:
-    mov r14, 3             ; state = in_array
-    jmp .next_char
-    
-.end_array:
-    mov r14, 0             ; state = outside
-    jmp .next_char
-    
-.escape_char:
-    ; Skip next character after '\'
+    xor eax, eax
+
+    ; Compare with structural chars
+    movdqa xmm1, [rel sse_quote]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_brace_open]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_brace_close]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_bracket_open]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_bracket_close]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_space]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_tab]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_lf]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    movdqa xmm1, [rel sse_cr]
+    pcmpeqb xmm1, xmm0
+    pmovmskb edx, xmm1
+    or eax, edx
+
+    test eax, eax
+    jz .skip_16
+
+    ; Process bits
+    xor ecx, ecx
+.bit_loop:
+    bsf ecx, eax
+    jz .done_block
+
+    mov r15b, [r12 + rcx]
+
+    cmp r14d, 1
+    je .str_char
+
+    cmp r15b, 0x22
+    je .enter_str
+    cmp r15b, 0x7B
+    je .enter_obj
+    cmp r15b, 0x7D
+    je .leave_obj
+    cmp r15b, 0x5B
+    je .enter_arr
+    cmp r15b, 0x5D
+    je .leave_arr
+
+    inc r15d
+
+.next_bit:
+    btr eax, ecx
+    jmp .bit_loop
+
+.done_block:
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.skip_16:
+    lea r12, [r12 + 16]
+    jmp .main_loop
+
+.enter_str:
+    mov r14d, 1
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.leave_str:
+    xor r14d, r14d
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.enter_obj:
+    mov r14d, 2
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.leave_obj:
+    xor r14d, r14d
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.enter_arr:
+    mov r14d, 3
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.leave_arr:
+    xor r14d, r14d
+    inc r15d
+    lea r12, [r12 + rcx + 1]
+    jmp .main_loop
+
+.str_char:
+    cmp r15b, 0x22
+    je .leave_str
+    cmp r15b, 0x5C
+    je .esc
+    inc r15d
+    jmp .next_bit
+
+.esc:
+    lea r12, [r12 + rcx + 2]
+    cmp r12, r13
+    jge .done
+    jmp .main_loop
+
+; ===== Scalar fallback =====
+.scalar_loop:
+    cmp r12, r13
+    jge .done
+    mov r15b, [r12]
+
+    cmp r14d, 1
+    je .scalar_str
+
+    cmp r15b, 0x22
+    je .scalar_enter_str
+    cmp r15b, 0x7B
+    je .scalar_enter_obj
+    cmp r15b, 0x7D
+    je .scalar_leave_obj
+    cmp r15b, 0x5B
+    je .scalar_enter_arr
+    cmp r15b, 0x5D
+    je .scalar_leave_arr
+    cmp r15b, 0x20
+    je .scalar_ws
+    cmp r15b, 0x09
+    je .scalar_ws
+    cmp r15b, 0x0A
+    je .scalar_ws
+    cmp r15b, 0x0D
+    je .scalar_ws
+
     inc r12
-    jmp .next_char
-    
-.next_char:
-    inc r12                 ; current_position++
-    jmp .loop
-    
-.end:
-    ; Restore registers
+    jmp .scalar_loop
+
+.scalar_enter_str:
+    mov r14d, 1
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_leave_str:
+    xor r14d, r14d
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_enter_obj:
+    mov r14d, 2
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_leave_obj:
+    xor r14d, r14d
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_enter_arr:
+    mov r14d, 3
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_leave_arr:
+    xor r14d, r14d
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_ws:
+    inc r15d
+    inc r12
+    jmp .scalar_loop
+
+.scalar_str:
+    cmp r15b, 0x22
+    je .scalar_leave_str
+    cmp r15b, 0x5C
+    je .scalar_esc
+    inc r12
+    jmp .scalar_loop
+
+.scalar_esc:
+    inc r12
+    inc r12
+    cmp r12, r13
+    jge .done
+    jmp .scalar_loop
+
+.done:
+    xor eax, eax
     pop r15
     pop r14
     pop r13
     pop r12
     pop rbx
-    
     mov rsp, rbp
     pop rbp
     ret
 
-; Advanced JSON tokenizer using AVX2
+; ===== AVX2 Tokenizer =====
 json_fast_tokenizer_avx2:
     push rbp
     mov rbp, rsp
-    
-    ; Save registers we will use
     push rbx
     push r12
     push r13
     push r14
     push r15
-    
-    ; rdi = json_string
-    ; rsi = length
-    ; r12 = current position
-    ; r13 = end position
-    ; r14 = state (0: outside, 1: in_string, 2: in_object, 3: in_array)
-    ; r15 = temporary register for SIMD operations
-    
-    mov r12, rdi          ; current position = start of string
-    mov r13, rsi           ; end position = length
-    mov r14, 0             ; state = outside
-    
-    ; Check for AVX2 support
-    push rbx
-    mov eax, 7
-    xor ecx, ecx
-    cpuid
-    pop rbx
-    test ebx, 1 << 5  ; Check AVX2 bit
-    jz json_fast_tokenizer  ; Fall back to SSE4.2 implementation
-    
-    ; Main processing loop with AVX2 optimizations
-.avx_loop:
-    cmp r12, r13           ; if current_position >= end_position, exit
-    jge .avx_end
-    
-    ; Check if we have at least 32 bytes remaining for AVX2 processing
-    mov r15, r13
-    sub r15, r12
-    cmp r15, 32
-    jb .avx_scalar_processing
-    
-    ; Load 32 bytes using AVX2
+
+    mov r12, rdi
+    mov r13, rsi
+    add r13, rdi
+    xor r14d, r14d
+    xor r15d, r15d
+
+    cmp r12, r13
+    jge .avx_done
+
+.avx_main:
+    mov rax, r13
+    sub rax, r12
+    cmp rax, 32
+    jb json_fast_tokenizer.main_loop
+
+    cmp r14d, 1
+    je json_fast_tokenizer.main_loop
+
     vmovdqu ymm0, [r12]
-    
-    ; Check for special characters using AVX2 instructions
-    ; This is a simplified version - in a real implementation,
-    ; we would use VPCMPISTRI for parallel character comparison
-    
-    ; For now, fall back to scalar processing
-    jmp .avx_scalar_processing
-    
-.avx_scalar_processing:
-    mov al, [r12]          ; load current character
-    
-    ; Process current state with optimized branching
-    cmp r14, 0             ; if state == outside
-    je .avx_outside
-    
-    cmp r14, 1             ; if state == in_string
-    je .avx_in_string
-    
-    cmp r14, 2             ; if state == in_object
-    je .avx_in_object
-    
-    cmp r14, 3             ; if state == in_array
-    je .avx_in_array
-    
-.avx_outside:
-    ; Process characters outside strings with optimized comparisons
-    cmp al, '"'            ; if char == '"', start string
-    je .avx_start_string
-    
-    cmp al, '{'            ; if char == '{', start object
-    je .avx_start_object
-    
-    cmp al, '['            ; if char == '[', start array
-    je .avx_start_array
-    
-    cmp al, '}'            ; if char == '}', end object
-    je .avx_end_object
-    
-    cmp al, ']'            ; if char == ']', end array
-    je .avx_end_array
-    
-    ; Skip whitespace characters using a jump table
-    movzx r15, al
-    lea rbx, [.whitespace_jump_table]
-    jmp [rbx + r15*8]      ; استخدام r15*8 مع dq
-    
-.avx_in_string:
-    ; Process characters inside string
-    cmp al, '"'            ; if char == '"', end string
-    je .avx_end_string
-    
-    cmp al, '\'            ; if char == '\', handle escape
-    je .avx_escape_char
-    
-    jmp .avx_next_char
-    
-.avx_in_object:
-    ; Process characters inside object
-    cmp al, '}'            ; if char == '}', end object
-    je .avx_end_object
-    
-    cmp al, '"'            ; if char == '"', start string
-    je .avx_start_string
-    
-    ; Skip whitespace characters using a jump table
-    movzx r15, al
-    lea rbx, [.whitespace_jump_table]
-    jmp [rbx + r15*8]      ; استخدام r15*8 مع dq
-    
-.avx_in_array:
-    ; Process characters inside array
-    cmp al, ']'            ; if char == ']', end array
-    je .avx_end_array
-    
-    cmp al, '"'            ; if char == '"', start string
-    je .avx_start_string
-    
-    ; Skip whitespace characters using a jump table
-    movzx r15, al
-    lea rbx, [.whitespace_jump_table]
-    jmp [rbx + r15*8]      ; استخدام r15*8 مع dq
-    
-.avx_start_string:
-    mov r14, 1             ; state = in_string
-    jmp .avx_next_char
-    
-.avx_end_string:
-    mov r14, 0             ; state = outside
-    jmp .avx_next_char
-    
-.avx_start_object:
-    mov r14, 2             ; state = in_object
-    jmp .avx_next_char
-    
-.avx_end_object:
-    mov r14, 0             ; state = outside
-    jmp .avx_next_char
-    
-.avx_start_array:
-    mov r14, 3             ; state = in_array
-    jmp .avx_next_char
-    
-.avx_end_array:
-    mov r14, 0             ; state = outside
-    jmp .avx_next_char
-    
-.avx_escape_char:
-    ; Skip next character after '\'
-    inc r12
-    jmp .avx_next_char
-    
-.whitespace_jump_table:
-    ; Jump table for whitespace characters (ASCII 0-255)
-    ; استخدام dq بدلاً من dd
-    times 256 dq .avx_process_char  ; Default for all characters
-    
-    ; Override entries for whitespace characters
-    dq .avx_next_char  ; 0 (null)
-    dq .avx_process_char  ; 1
-    dq .avx_process_char  ; 2
-    dq .avx_process_char  ; 3
-    dq .avx_process_char  ; 4
-    dq .avx_process_char  ; 5
-    dq .avx_process_char  ; 6
-    dq .avx_process_char  ; 7
-    dq .avx_process_char  ; 8
-    dq .avx_next_char  ; 9 (tab)
-    dq .avx_next_char  ; 10 (newline)
-    dq .avx_process_char  ; 11
-    dq .avx_process_char  ; 12
-    dq .avx_next_char  ; 13 (return)
-    dq .avx_process_char  ; 14
-    dq .avx_process_char  ; 15
-    dq .avx_process_char  ; 16
-    dq .avx_process_char  ; 17
-    dq .avx_process_char  ; 18
-    dq .avx_process_char  ; 19
-    dq .avx_process_char  ; 20
-    dq .avx_process_char  ; 21
-    dq .avx_process_char  ; 22
-    dq .avx_process_char  ; 23
-    dq .avx_process_char  ; 24
-    dq .avx_process_char  ; 25
-    dq .avx_process_char  ; 26
-    dq .avx_process_char  ; 27
-    dq .avx_process_char  ; 28
-    dq .avx_process_char  ; 29
-    dq .avx_process_char  ; 30
-    dq .avx_process_char  ; 31
-    dq .avx_next_char  ; 32 (space)
-    
-.avx_process_char:
-    ; Process non-whitespace characters based on state
-    cmp r14, 0             ; if state == outside
-    je .avx_outside
-    
-    cmp r14, 1             ; if state == in_string
-    je .avx_in_string
-    
-    cmp r14, 2             ; if state == in_object
-    je .avx_in_object
-    
-    cmp r14, 3             ; if state == in_array
-    je .avx_in_array
-    
-    jmp .avx_next_char
-    
-.avx_next_char:
-    inc r12                 ; current_position++
-    jmp .avx_loop
-    
-.avx_end:
-    ; Restore registers
+    xor eax, eax
+
+    vpcmpeqb ymm1, ymm0, [rel avx_quote]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_brace_open]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_brace_close]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_bracket_open]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_bracket_close]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_space]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_tab]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_lf]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    vpcmpeqb ymm1, ymm0, [rel avx_cr]
+    vpmovmskb edx, ymm1
+    or eax, edx
+
+    test eax, eax
+    jz .avx_skip
+
+    jmp json_fast_tokenizer.main_loop
+
+.avx_skip:
+    lea r12, [r12 + 32]
+    jmp .avx_main
+
+.avx_done:
+    xor eax, eax
     pop r15
     pop r14
     pop r13
     pop r12
     pop rbx
-    
     mov rsp, rbp
     pop rbp
     ret

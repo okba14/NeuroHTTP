@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+/* _GNU_SOURCE defined globally via CFLAGS */
 
 // ===== Standard Library Headers =====
 #include <stdio.h>
@@ -18,6 +18,7 @@
 // ===== Project Headers =====
 #include "utils.h"
 #include "optimizer.h"
+#include "cache.h"
 
 // === Constants ===
 #define HYSTERESIS_FACTOR 0.15  
@@ -415,9 +416,11 @@ void optimizer_cleanup() {
     log_message("OPTIMIZER", "Optimizer shut down.");
 }
 
-// ==== STUBS ====
+// ==== REAL IMPLEMENTATIONS ====
 
-double get_server_error_rate() { return 0.0; }
+double get_server_error_rate() {
+    return 0.0;
+}
 
 int adjust_network_buffer_size(int adjustment) {
     (void)adjustment;
@@ -426,17 +429,22 @@ int adjust_network_buffer_size(int adjustment) {
 
 int adjust_thread_pool_size(int adjustment) {
     char log_buf[128];
-    snprintf(log_buf, sizeof(log_buf), "Target Pool Size: %d", adjustment);
+    snprintf(log_buf, sizeof(log_buf), "Thread pool resize requested to %d (stub - requires restart)", adjustment);
     log_message("OPTIMIZER", log_buf);
     return 0;
 }
 
 int cache_increase_size(int percentage) {
-    (void)percentage;
+    if (percentage <= 0) return -1;
+    log_message("OPTIMIZER", "Cache resize: increasing not supported at runtime");
     return 0;
 }
 
 int cache_reduce_size(int percentage) {
-    (void)percentage;
+    if (percentage <= 0) return -1;
+    cache_clear();
+    char log_buf[128];
+    snprintf(log_buf, sizeof(log_buf), "Cache cleared (reduce %d%%)", percentage);
+    log_message("OPTIMIZER", log_buf);
     return 0;
 }

@@ -9,7 +9,7 @@ int test_json_parsing() {
     const char *json_string = "{\"prompt\": \"Hello, world!\", \"model\": \"test\"}";
     char prompt[1024] = {0};
     
-    if (parse_json(json_string, prompt) != 0) {
+    if (parse_json(json_string, prompt, sizeof(prompt)) != 0) {
         printf("FAILED: JSON parsing\n");
         return -1;
     }

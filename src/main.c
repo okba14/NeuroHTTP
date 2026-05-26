@@ -1,26 +1,23 @@
 #define _POSIX_C_SOURCE 200809L
-
-// ===== Standard Library Headers =====
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <time.h>  
+#include <time.h>
 #include <pthread.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <sys/inotify.h>
 #include <stdarg.h>
-#include <limits.h>  
-#include <netinet/in.h>  
-#include <arpa/inet.h>  
-#include <sys/stat.h>   
-#include <fcntl.h>      
+#include <limits.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <errno.h>
-#include <stdint.h> // Added for uint32_t support
-
-// ===== Project Headers =====
+#include <stdint.h>
+#include <sys/epoll.h>
 #include "config.h"
 #include "server.h"
 #include "parser.h"
@@ -28,162 +25,100 @@
 #include "optimizer.h"
 #include "cache.h"
 #include "plugin.h"
-
-// ===== AI Modules =====
 #include "ai/prompt_router.h"
 #include "ai/tokenizer.h"
 #include "ai/stats.h"
-
-// ===== Low-level Utils =====
 #include "asm_utils.h"
+#include "observability.h"
+#include "arena.h"
 
-// ===== Version Information =====
 #define AIONIC_VERSION_MAJOR 1
-#define AIONIC_VERSION_MINOR 0
+#define AIONIC_VERSION_MINOR 1
 #define AIONIC_VERSION_PATCH 0
-#define AIONIC_VERSION_STRING "1.0.0"
-
+#define AIONIC_VERSION_STRING "1.1.0"
 #ifndef BUILD_DATE
 #define BUILD_DATE __DATE__
 #endif
-
 #ifndef BUILD_TIME
 #define BUILD_TIME __TIME__
 #endif
-
 #ifndef GIT_COMMIT
 #define GIT_COMMIT "unknown"
 #endif
-
-// ===== Constants =====
 #define CONFIG_WATCH_BUFFER_SIZE 4096
 
-// ===== External Assembly Functions (Linkage) =====
-// Declaring functions from crc32.s to make them available in C
 extern uint32_t crc32_asm(const void *data, size_t length);
 extern uint32_t crc32_asm_avx2(const void *data, size_t length);
 
-// ===== Error Codes =====
 typedef enum {
-    AIONIC_SUCCESS = 0,
-    AIONIC_ERROR_CONFIG,
-    AIONIC_ERROR_CACHE,
-    AIONIC_ERROR_FIREWALL,
-    AIONIC_ERROR_OPTIMIZER,
-    AIONIC_ERROR_AI_ROUTER,
-    AIONIC_ERROR_TOKENIZER,
-    AIONIC_ERROR_STATS,
-    AIONIC_ERROR_PLUGIN,
-    AIONIC_ERROR_SERVER,
-    AIONIC_ERROR_MEMORY,
-    AIONIC_ERROR_SYSTEM
+    AIONIC_SUCCESS = 0, AIONIC_ERROR_CONFIG, AIONIC_ERROR_CACHE, AIONIC_ERROR_FIREWALL,
+    AIONIC_ERROR_OPTIMIZER, AIONIC_ERROR_AI_ROUTER, AIONIC_ERROR_TOKENIZER,
+    AIONIC_ERROR_STATS, AIONIC_ERROR_PLUGIN, AIONIC_ERROR_SERVER,
+    AIONIC_ERROR_MEMORY, AIONIC_ERROR_SYSTEM
 } AionicErrorCode;
 
-// ===== Error Handling =====
-typedef struct {
-    AionicErrorCode code;
-    const char *message;
-    const char *file;
-    int line;
-    const char *function;
-} AionicError;
+typedef struct { AionicErrorCode code; const char *message; const char *file; int line; const char *function; } AionicError;
 
-#define AIONIC_ERROR_CREATE(code, message) \
-    ((AionicError){code, message, __FILE__, __LINE__, __func__})
+#define AIONIC_ERROR_CREATE(code, message) ((AionicError){code, message, __FILE__, __LINE__, __func__})
 
-// ===== Logging System =====
-typedef enum {
-    LOG_LEVEL_DEBUG,
-    LOG_LEVEL_INFO,
-    LOG_LEVEL_WARNING,
-    LOG_LEVEL_ERROR,
-    LOG_LEVEL_FATAL
-} LogLevel;
+typedef enum { LOG_LEVEL_DEBUG, LOG_LEVEL_INFO, LOG_LEVEL_WARNING, LOG_LEVEL_ERROR, LOG_LEVEL_FATAL } LogLevel;
+typedef struct { LogLevel level; FILE *output; int use_colors; } Logger;
 
 typedef struct {
-    LogLevel level;
-    FILE *output;
-    int use_colors;
-} Logger;
-
-// ===== System State =====
-typedef struct {
-    int cache_initialized;
-    int firewall_initialized;
-    int optimizer_initialized;
-    int ai_router_initialized;
-    int tokenizer_initialized;
-    int stats_initialized;
-    int plugin_initialized;
-    int server_initialized;
-    int server_started;
+    int cache_initialized, firewall_initialized, optimizer_initialized;
+    int ai_router_initialized, tokenizer_initialized, stats_initialized;
+    int plugin_initialized, server_initialized, server_started;
 } SystemState;
 
-// ===== Thread Pool =====
-typedef struct {
-    pthread_t *threads;
-    int thread_count;
-} ThreadPool;
+typedef struct { pthread_t *threads; int thread_count; } ThreadPool;
+typedef struct { char **config_paths; int config_count; int config_capacity; } ConfigPaths;
 
-// ===== Config Paths =====
 typedef struct {
-    char **config_paths;
-    int config_count;
-    int config_capacity;
-} ConfigPaths;
-
-// ===== AIONIC System =====
-typedef struct {
-    Config config;
-    Server server;
-    Logger logger;
-    SystemState state;
-    ThreadPool thread_pool;
-    ConfigPaths config_paths;
-    int inotify_fd;
-    int config_wd;
+    Config config; Server server; Logger logger; SystemState state;
+    ThreadPool thread_pool; ConfigPaths config_paths;
+    int inotify_fd; int config_wd;
 } AionicSystem;
 
-// Global variable to control server running state
-volatile sig_atomic_t running = 1;
+static volatile sig_atomic_t running = 1;
+static int signal_pipe[2] = {-1, -1};
 
-// Function prototypes
-static void handle_signal(int sig);
-static void print_version_info(void);
-static void logger_init(Logger *logger, LogLevel level, FILE *output, int use_colors);
-static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
-    __attribute__((format(printf, 3, 4)));
-static void handle_error(AionicError error);
-static int initialize_components(AionicSystem *system);
-static void cleanup_components(AionicSystem *system);
-static int thread_pool_init(ThreadPool *pool, int thread_count);
-static void thread_pool_cleanup(ThreadPool *pool);
-static void *worker_thread(void *arg);
-static void drop_privileges(void);
-static int config_paths_init(ConfigPaths *paths);
-static void config_paths_cleanup(ConfigPaths *paths);
-static int load_hierarchical_config(const char *base_path, Config *config);
-static int setup_inotify(AionicSystem *system, const char *config_path);
-static void check_config_reload(AionicSystem *system);
-static void recover_from_error(AionicError error, AionicSystem *system);
-static int safe_file_exists(const char *path);
-
-/**
- * @brief Signal handler for graceful shutdown
- * 
- * This function is called when a signal is received to shut down
- * the server gracefully.
- * 
- * @param sig The signal number
- */
 static void handle_signal(int sig) {
-    printf("\nReceived signal %d, shutting down gracefully...\n", sig);
-    running = 0;
+    if (sig == SIGINT || sig == SIGTERM) {
+        running = 0;
+        iouring_global_stop = 1;
+        if (signal_pipe[1] >= 0) {
+            char c = 1;
+            write(signal_pipe[1], &c, 1);
+        }
+    } else if (sig == SIGHUP) {
+        if (signal_pipe[1] >= 0) {
+            char c = 2;
+            write(signal_pipe[1], &c, 1);
+        }
+    }
 }
 
-/**
- * @brief Print version and build information
- */
+static void setup_signal_handling(void) {
+    if (pipe(signal_pipe) < 0) { signal_pipe[0] = -1; signal_pipe[1] = -1; return; }
+    fcntl(signal_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(signal_pipe[1], F_SETFL, O_NONBLOCK);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
+
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM);
+    sigaddset(&set, SIGHUP);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+}
+
 static void print_version_info(void) {
     printf("========================================\n");
     printf("    AIONIC AI Web Server v%s\n", AIONIC_VERSION_STRING);
@@ -193,35 +128,13 @@ static void print_version_info(void) {
     printf("========================================\n");
 }
 
-/**
- * @brief Initialize the logging system
- * 
- * @param logger Pointer to the logger structure
- * @param level Minimum log level to display
- * @param output Output file stream
- * @param use_colors Whether to use colored output
- */
 static void logger_init(Logger *logger, LogLevel level, FILE *output, int use_colors) {
-    logger->level = level;
-    logger->output = output;
-    logger->use_colors = use_colors;
+    logger->level = level; logger->output = output; logger->use_colors = use_colors;
 }
 
-/**
- * @brief Log a message with the specified level
- * 
- * @param logger Pointer to the logger structure
- * @param level Log level
- * @param format Format string (must be a literal string)
- * @param ... Variable arguments
- */
 static void logger_log(Logger *logger, LogLevel level, const char *format, ...) {
     if (level < logger->level) return;
-    
-    const char *level_str;
-    const char *color_start = "";
-    const char *color_end = "";
-    
+    const char *level_str, *color_start = "", *color_end = "";
     if (logger->use_colors) {
         switch (level) {
             case LOG_LEVEL_DEBUG: color_start = "\033[36m"; break;
@@ -232,7 +145,6 @@ static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
         }
         color_end = "\033[0m";
     }
-    
     switch (level) {
         case LOG_LEVEL_DEBUG: level_str = "DEBUG"; break;
         case LOG_LEVEL_INFO: level_str = "INFO"; break;
@@ -240,14 +152,10 @@ static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
         case LOG_LEVEL_ERROR: level_str = "ERROR"; break;
         case LOG_LEVEL_FATAL: level_str = "FATAL"; break;
     }
-    
-    // Print timestamp and message
     time_t now = time(NULL);
     struct tm *tm_info = localtime(&now);
     char time_buffer[26];
     strftime(time_buffer, 26, "%Y-%m-%d %H:%M:%S", tm_info);
-    
-    // Use fputs for constant strings to avoid format string issues
     fputs(time_buffer, logger->output);
     fputs(" [", logger->output);
     fputs(level_str, logger->output);
@@ -255,26 +163,17 @@ static void logger_log(Logger *logger, LogLevel level, const char *format, ...) 
     fputs(color_start, logger->output);
     fputs(color_end, logger->output);
     fputs(": ", logger->output);
-    
     va_list args;
     va_start(args, format);
-
     vfprintf(logger->output, format, args);
     va_end(args);
-    
     fputs(color_end, logger->output);
     fputs("\n", logger->output);
     fflush(logger->output);
 }
 
-/**
- * @brief Handle an error by printing its details
- * 
- * @param error The error structure
- */
 static void handle_error(AionicError error) {
     const char *error_str;
-    
     switch (error.code) {
         case AIONIC_SUCCESS: error_str = "Success"; break;
         case AIONIC_ERROR_CONFIG: error_str = "Configuration Error"; break;
@@ -290,587 +189,280 @@ static void handle_error(AionicError error) {
         case AIONIC_ERROR_SYSTEM: error_str = "System Error"; break;
         default: error_str = "Unknown Error"; break;
     }
-    
-    // Use fputs for constant strings to avoid format string issues
-    fputs("❌ ", stderr);
-    fputs(error_str, stderr);
-    fputs(": ", stderr);
-    fputs(error.message, stderr);
-    fputs("\n   at ", stderr);
-    fputs(error.file, stderr);
-    fputs(":", stderr);
-    fprintf(stderr, "%d", error.line);
-    fputs(" in ", stderr);
-    fputs(error.function, stderr);
-    fputs("()\n", stderr);
+    fprintf(stderr, "[ERROR] %s: %s at %s:%d in %s()\n", error_str, error.message, error.file, error.line, error.function);
 }
 
-/**
- * @brief Initialize all system components
- * 
- * @param system Pointer to the AIONIC system structure
- * @return 0 on success, -1 on failure
- */
 static int initialize_components(AionicSystem *system) {
-    // Initialize cache
     if (system->config.enable_cache && cache_init(system->config.cache_size, system->config.cache_ttl) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CACHE, "Failed to initialize cache"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CACHE, "Failed to initialize cache")); return -1;
     }
     system->state.cache_initialized = system->config.enable_cache;
-    
-    if (system->state.cache_initialized) {
-        logger_log(&system->logger, LOG_LEVEL_INFO, "Cache initialized (%d entries, %d TTL)", 
-                   system->config.cache_size, system->config.cache_ttl);
-    }
-    
-    // Initialize firewall
+    if (system->state.cache_initialized)
+        logger_log(&system->logger, LOG_LEVEL_INFO, "Cache initialized (%d entries, %d TTL)", system->config.cache_size, system->config.cache_ttl);
+
     if (system->config.enable_firewall && firewall_init(&system->config) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_FIREWALL, "Failed to initialize firewall"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_FIREWALL, "Failed to initialize firewall")); return -1;
     }
     system->state.firewall_initialized = system->config.enable_firewall;
-    
-    if (system->state.firewall_initialized) {
-        logger_log(&system->logger, LOG_LEVEL_INFO, "Firewall initialized");
-    }
-    
-    // Initialize optimizer
+    if (system->state.firewall_initialized) logger_log(&system->logger, LOG_LEVEL_INFO, "Firewall initialized");
+
     if (system->config.enable_optimization && optimizer_init(&system->config) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_OPTIMIZER, "Failed to initialize optimizer"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_OPTIMIZER, "Failed to initialize optimizer")); return -1;
     }
     system->state.optimizer_initialized = system->config.enable_optimization;
-    
-    if (system->state.optimizer_initialized) {
-        logger_log(&system->logger, LOG_LEVEL_INFO, "Optimizer initialized");
-    }
-    
-    // Initialize AI prompt router
-    if (prompt_router_init() != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_AI_ROUTER, "Failed to initialize AI prompt router"));
-        return -1;
+    if (system->state.optimizer_initialized) logger_log(&system->logger, LOG_LEVEL_INFO, "Optimizer initialized");
+
+    if (prompt_router_init_with_config(&system->config) != 0) {
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_AI_ROUTER, "Failed to initialize AI prompt router")); return -1;
     }
     system->state.ai_router_initialized = 1;
-    
     logger_log(&system->logger, LOG_LEVEL_INFO, "AI prompt router initialized");
-    
-    // Initialize tokenizer
+
     if (tokenizer_init() != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_TOKENIZER, "Failed to initialize tokenizer"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_TOKENIZER, "Failed to initialize tokenizer")); return -1;
     }
     system->state.tokenizer_initialized = 1;
-    
     logger_log(&system->logger, LOG_LEVEL_INFO, "Tokenizer initialized");
-    
-    // Initialize stats collector
+
     if (stats_init("stats.json", 300) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_STATS, "Failed to initialize stats collector"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_STATS, "Failed to initialize stats collector")); return -1;
     }
     system->state.stats_initialized = 1;
-    
     logger_log(&system->logger, LOG_LEVEL_INFO, "Stats collector initialized");
-    
-    // Initialize plugin system
+
     if (plugin_init("plugins") != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_PLUGIN, "Failed to initialize plugin system"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_PLUGIN, "Failed to initialize plugin system")); return -1;
     }
     system->state.plugin_initialized = 1;
-    
     logger_log(&system->logger, LOG_LEVEL_INFO, "Plugin system initialized");
-    
-    // Create and start server
+
+    if (system->config.enable_observability) {
+        obs_init();
+        logger_log(&system->logger, LOG_LEVEL_INFO, "Observability system initialized");
+    }
+
     if (server_init(&system->server, &system->config) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SERVER, "Failed to initialize server"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SERVER, "Failed to initialize server")); return -1;
     }
     system->state.server_initialized = 1;
-    
+
     if (server_start(&system->server) != 0) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SERVER, "Failed to start server"));
-        return -1;
+        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SERVER, "Failed to start server")); return -1;
     }
     system->state.server_started = 1;
-    
+
     logger_log(&system->logger, LOG_LEVEL_INFO, "Server started successfully");
-    logger_log(&system->logger, LOG_LEVEL_INFO, "AIONIC Server is running on http://localhost:%d", 
-               system->config.port);
-    
+    logger_log(&system->logger, LOG_LEVEL_INFO, "AIONIC Server is running on http://localhost:%d", system->config.port);
     return 0;
 }
 
-/**
- * @brief Clean up all system components
- * 
- * @param system Pointer to the AIONIC system structure
- */
 static void cleanup_components(AionicSystem *system) {
-    if (system->state.server_started) {
-        server_stop(&system->server);
-        system->state.server_started = 0;
-    }
-    
-    if (system->state.server_initialized) {
-        server_cleanup(&system->server);
-        system->state.server_initialized = 0;
-    }
-    
-    if (system->state.plugin_initialized) {
-        plugin_cleanup();
-        system->state.plugin_initialized = 0;
-    }
-    
-    if (system->state.stats_initialized) {
-        stats_cleanup();
-        system->state.stats_initialized = 0;
-    }
-    
-    if (system->state.tokenizer_initialized) {
-        tokenizer_cleanup();
-        system->state.tokenizer_initialized = 0;
-    }
-    
-    if (system->state.ai_router_initialized) {
-        prompt_router_cleanup();
-        system->state.ai_router_initialized = 0;
-    }
-    
-    if (system->state.optimizer_initialized) {
-        optimizer_cleanup();
-        system->state.optimizer_initialized = 0;
-    }
-    
-    if (system->state.firewall_initialized) {
-        firewall_cleanup();
-        system->state.firewall_initialized = 0;
-    }
-    
-    if (system->state.cache_initialized) {
-        cache_cleanup();
-        system->state.cache_initialized = 0;
-    }
-    
+    if (system->state.server_started) { server_stop(&system->server); system->state.server_started = 0; }
+    if (system->state.server_initialized) { server_cleanup(&system->server); system->state.server_initialized = 0; }
+    if (system->state.plugin_initialized) { plugin_cleanup(); system->state.plugin_initialized = 0; }
+    if (system->state.stats_initialized) { stats_cleanup(); system->state.stats_initialized = 0; }
+    if (system->state.tokenizer_initialized) { tokenizer_cleanup(); system->state.tokenizer_initialized = 0; }
+    if (system->state.ai_router_initialized) { prompt_router_cleanup(); system->state.ai_router_initialized = 0; }
+    if (system->state.optimizer_initialized) { optimizer_cleanup(); system->state.optimizer_initialized = 0; }
+    if (system->state.firewall_initialized) { firewall_cleanup(); system->state.firewall_initialized = 0; }
+    if (system->state.cache_initialized) { cache_cleanup(); system->state.cache_initialized = 0; }
     free_config(&system->config);
 }
 
-/**
- * @brief Initialize thread pool
- * 
- * @param pool Pointer to the thread pool structure
- * @param thread_count Number of threads to create
- * @return 0 on success, -1 on failure
- */
 static int thread_pool_init(ThreadPool *pool, int thread_count) {
-    pool->thread_count = thread_count;
-    pool->threads = malloc(sizeof(pthread_t) * thread_count);
-    if (!pool->threads) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, "Failed to allocate memory for thread pool"));
-        return -1;
-    }
-    
-    // Create threads
-    for (int i = 0; i < thread_count; i++) {
-        if (pthread_create(&pool->threads[i], NULL, worker_thread, NULL) != 0) {
-            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to create worker thread"));
-            free(pool->threads);
-            return -1;
-        }
-    }
-    
-    return 0;
+    pool->thread_count = 0; pool->threads = NULL; (void)thread_count; return 0;
 }
 
-/**
- * @brief Clean up thread pool
- * 
- * @param pool Pointer to the thread pool structure
- */
 static void thread_pool_cleanup(ThreadPool *pool) {
-    if (pool->threads) {
-        // Cancel threads
-        for (int i = 0; i < pool->thread_count; i++) {
-            pthread_cancel(pool->threads[i]);
-        }
-        
-        // Join threads
-        for (int i = 0; i < pool->thread_count; i++) {
-            pthread_join(pool->threads[i], NULL);
-        }
-        
-        free(pool->threads);
-        pool->threads = NULL;
-    }
+    free(pool->threads); pool->threads = NULL; pool->thread_count = 0;
 }
 
-/**
- * @brief Worker thread function
- * 
- * @param arg Thread argument (not used)
- * @return NULL
- */
-static void *worker_thread(void *arg) {
-    (void)arg;  // Avoid unused parameter warning
-    
-    // Set thread cancellation state
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-    
-    // Worker thread main loop
-    while (running) {
-        
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 10000000; // 10ms
-        nanosleep(&ts, NULL);
-    }
-    
-    return NULL;
-}
-
-/**
- * @brief Drop privileges to 'nobody' user if running as root
- */
 static void drop_privileges(void) {
     if (getuid() == 0) {
         struct passwd *pw = getpwnam("nobody");
-        if (pw) {
-            if (setgid(pw->pw_gid) != 0 || setuid(pw->pw_uid) != 0) {
-                handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to drop privileges"));
-            } else {
-                printf("✅ Dropped privileges to user 'nobody'\n");
-            }
-        }
+        if (pw && (setgid(pw->pw_gid) != 0 || setuid(pw->pw_uid) != 0))
+            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to drop privileges"));
     }
 }
 
-/**
- * @brief Initialize config paths structure
- * 
- * @param paths Pointer to the config paths structure
- * @return 0 on success, -1 on failure
- */
 static int config_paths_init(ConfigPaths *paths) {
-    paths->config_count = 0;
-    paths->config_capacity = 4;
+    paths->config_count = 0; paths->config_capacity = 4;
     paths->config_paths = malloc(sizeof(char *) * paths->config_capacity);
-    if (!paths->config_paths) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, 
-                                        "Failed to allocate memory for config paths"));
-        return -1;
-    }
-    
+    if (!paths->config_paths) { handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, "Failed to allocate memory for config paths")); return -1; }
     return 0;
 }
 
-/**
- * @brief Clean up config paths structure
- * 
- * @param paths Pointer to the config paths structure
- */
 static void config_paths_cleanup(ConfigPaths *paths) {
     if (paths->config_paths) {
-        for (int i = 0; i < paths->config_count; i++) {
-            free(paths->config_paths[i]);
-        }
-        free(paths->config_paths);
-        paths->config_paths = NULL;
+        for (int i = 0; i < paths->config_count; i++) free(paths->config_paths[i]);
+        free(paths->config_paths); paths->config_paths = NULL;
     }
-    paths->config_count = 0;
-    paths->config_capacity = 0;
+    paths->config_count = 0; paths->config_capacity = 0;
 }
 
-/**
- * @brief Safely check if a file exists
- * 
- * This function avoids the TOCTOU (Time-of-Check to Time-of-Use) vulnerability
- * by not using access() and instead using stat().
- * 
- * @param path Path to the file
- * @return 1 if file exists, 0 if it doesn't, -1 on error
- */
 static int safe_file_exists(const char *path) {
     struct stat st;
-    if (stat(path, &st) == 0) {
-        return S_ISREG(st.st_mode) ? 1 : 0;
-    }
-    return 0;
+    return (stat(path, &st) == 0 && S_ISREG(st.st_mode)) ? 1 : 0;
 }
 
-/**
- * @brief Load hierarchical configuration files
- * 
- * @param base_path Base configuration directory path
- * @param config Pointer to the configuration structure
- * @return 0 on success, -1 on failure
- */
 static int load_hierarchical_config(const char *base_path, Config *config) {
     char path[PATH_MAX];
-    
-
-    snprintf(path, sizeof(path), "%s/base.conf", base_path);
-    if (safe_file_exists(path)) {
-        if (load_config(path, config) != 0) {
-            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load base configuration"));
-            return -1;
-        }
-    } else {
-
-        snprintf(path, sizeof(path), "%s/aionic.conf", base_path);
-        if (load_config(path, config) != 0) {
-            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load configuration"));
-            return -1;
-        }
-    }
-    
-
+    snprintf(path, sizeof(path), "%s/aionic.conf", base_path);
+    if (safe_file_exists(path)) { if (load_config(path, config) != 0) return -1; }
     const char *env = getenv("AIONIC_ENV");
     if (env) {
         snprintf(path, sizeof(path), "%s/%s.conf", base_path, env);
-        if (safe_file_exists(path) && load_config(path, config) != 0) {
-            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, 
-                                            "Failed to load environment configuration"));
-            return -1;
-        }
+        if (safe_file_exists(path) && load_config(path, config) != 0) return -1;
     }
-    
-
     snprintf(path, sizeof(path), "%s/local.conf", base_path);
-    if (safe_file_exists(path)) {
-        if (load_config(path, config) != 0) {
-            handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load local configuration"));
-            return -1;
-        }
-    }
-    
+    if (safe_file_exists(path) && load_config(path, config) != 0) return -1;
     return 0;
 }
 
-/**
- * @brief Set up inotify to watch for configuration file changes
- * 
- * @param system Pointer to the AIONIC system structure
- * @param config_path Path to the configuration file
- * @return 0 on success, -1 on failure
- */
 static int setup_inotify(AionicSystem *system, const char *config_path) {
     system->inotify_fd = inotify_init1(IN_NONBLOCK);
-    if (system->inotify_fd == -1) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize inotify"));
-        return -1;
-    }
-    
+    if (system->inotify_fd == -1) return -1;
     system->config_wd = inotify_add_watch(system->inotify_fd, config_path, IN_MODIFY);
-    if (system->config_wd == -1) {
-        handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to add config file to inotify"));
-        close(system->inotify_fd);
-        return -1;
-    }
-    
-    logger_log(&system->logger, LOG_LEVEL_DEBUG, "Inotify set up for config file: %s", config_path);
+    if (system->config_wd == -1) { close(system->inotify_fd); return -1; }
     return 0;
 }
 
-/**
- * @brief Check for configuration file changes and reload if necessary
- * 
- * @param system Pointer to the AIONIC system structure
- */
 static void check_config_reload(AionicSystem *system) {
     if (system->inotify_fd == -1) return;
-    
     char buffer[CONFIG_WATCH_BUFFER_SIZE];
     ssize_t length = read(system->inotify_fd, buffer, sizeof(buffer));
-    
     if (length > 0) {
         logger_log(&system->logger, LOG_LEVEL_INFO, "Configuration file modified, reloading...");
-        
-
         Config old_config = system->config;
-        
-
+        memset(&system->config, 0, sizeof(Config));
         if (load_hierarchical_config("config", &system->config) != 0) {
-            logger_log(&system->logger, LOG_LEVEL_ERROR, 
-                       "Failed to reload configuration, using previous settings");
+            logger_log(&system->logger, LOG_LEVEL_ERROR, "Failed to reload configuration, using previous settings");
+            free_config(&system->config);
             system->config = old_config;
         } else {
             logger_log(&system->logger, LOG_LEVEL_INFO, "Configuration reloaded successfully");
-            
-            
         }
     }
 }
 
-/**
- * @brief Recover from an error by cleaning up resources
- * 
- * @param error The error that occurred
- * @param system Pointer to the AIONIC system structure
- */
 static void recover_from_error(AionicError error, AionicSystem *system) {
     handle_error(error);
-    
-    printf("\n🛑 Recovering from error...\n");
-    
+    printf("\n[RECOVERY] Cleaning up after error...\n");
     cleanup_components(system);
-    
-    // Clean up additional resources
-    if (system->inotify_fd != -1) {
-        close(system->inotify_fd);
-        system->inotify_fd = -1;
-    }
-    
+    if (system->inotify_fd != -1) { close(system->inotify_fd); system->inotify_fd = -1; }
     config_paths_cleanup(&system->config_paths);
     thread_pool_cleanup(&system->thread_pool);
-    
-    printf("✅ Recovery completed\n");
+    printf("[RECOVERY] Completed\n");
 }
 
-/**
- * @brief Main entry point for the AIONIC AI Web Server
- * 
- * @param argc Argument count
- * @param argv Argument vector
- * @return Exit code
- */
 int main(int argc, char *argv[]) {
-    (void)argc;  // Avoid unused parameter warning
-    (void)argv;  // Avoid unused parameter warning
-    
-    // Initialize AIONIC system
+    (void)argc; (void)argv;
     AionicSystem system = {0};
     system.inotify_fd = -1;
-    
-    // Print version information
     print_version_info();
-    
-    // Initialize logger
     logger_init(&system.logger, LOG_LEVEL_INFO, stdout, 1);
-    
-    // Detect CPU Features (Hardware Acceleration Support)
-    // This must be called before checking flags to populate them
     detect_cpu_features();
+    setup_signal_handling();
 
-    // Register signal handlers
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
-    
     logger_log(&system.logger, LOG_LEVEL_INFO, "Starting AIONIC Server...");
-    
-    // Display hardware acceleration support
     logger_log(&system.logger, LOG_LEVEL_INFO, "Hardware acceleration support:");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX2: %s", has_avx2_support() ? "Yes" : "No");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX-512: %s", has_avx512_support() ? "Yes" : "No");
 
-    // ===== Assembly Functions Linkage Verification =====
-    // This block links and tests the functions from crc32.s
     {
         const char *test_vector = "AIONIC-Hardware-Acceleration-Test";
         size_t len = strlen(test_vector);
-        uint32_t crc_val = 0;
-        
         logger_log(&system.logger, LOG_LEVEL_INFO, "Verifying Assembly Linkage...");
-        
-        // Test Standard SSE4.2 Implementation
-        crc_val = crc32_asm(test_vector, len);
+        uint32_t crc_val = crc32_asm(test_vector, len);
         logger_log(&system.logger, LOG_LEVEL_INFO, "   [CRC32-SSE4.2] Checksum: 0x%08X", crc_val);
-        
-        // Test AVX2 Implementation (Only if supported)
         if (has_avx2_support()) {
             uint32_t crc_avx2 = crc32_asm_avx2(test_vector, len);
             logger_log(&system.logger, LOG_LEVEL_INFO, "   [CRC32-AVX2]   Checksum: 0x%08X", crc_avx2);
-            
-            // Optional: Consistency check (warning if mismatch)
-            if (crc_val != crc_avx2) {
-                 logger_log(&system.logger, LOG_LEVEL_WARNING, "   [WARNING] CRC32 mismatch between implementations!");
-            }
+            if (crc_val != crc_avx2) logger_log(&system.logger, LOG_LEVEL_WARNING, "   [WARNING] CRC32 mismatch!");
         }
     }
-    // ===================================================
-    
-    // Initialize config paths
+
     if (config_paths_init(&system.config_paths) != 0) {
-        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, "Failed to initialize config paths"), 
-                          &system);
+        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, "Failed to initialize config paths"), &system);
         return 1;
     }
-    
-    // Load hierarchical configuration
+
     if (load_hierarchical_config("config", &system.config) != 0) {
-        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load configuration"), 
-                          &system);
+        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CONFIG, "Failed to load configuration"), &system);
         return 1;
     }
-    
+
     logger_log(&system.logger, LOG_LEVEL_INFO, "Configuration loaded successfully");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Port: %d", system.config.port);
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Threads: %d", system.config.thread_count);
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Max Connections: %d", system.config.max_connections);
-    
-    // Initialize thread pool
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - io_uring: %s", system.config.enable_iouring ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - Zero-Copy: %s", system.config.enable_zero_copy ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - Smart Routing: %s", system.config.enable_smart_routing ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - Streaming: %s", system.config.enable_streaming ? "enabled" : "disabled");
+
     if (thread_pool_init(&system.thread_pool, system.config.thread_count) != 0) {
-        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize thread pool"), 
-                          &system);
+        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize thread pool"), &system);
         return 1;
     }
-    
-    // Set up inotify for configuration hot reload
+
     if (setup_inotify(&system, "config/aionic.conf") != 0) {
-        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to set up inotify"), 
-                          &system);
-        return 1;
+        logger_log(&system.logger, LOG_LEVEL_WARNING, "Inotify setup failed, hot-reload disabled");
+        system.inotify_fd = -1;
     }
-    
-    // Initialize all components
+
     if (initialize_components(&system) != 0) {
-        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize components"), 
-                          &system);
+        recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize components"), &system);
         return 1;
     }
-    
-    // Drop privileges if running as root
+
     drop_privileges();
-    
+
     logger_log(&system.logger, LOG_LEVEL_INFO, "Press Ctrl+C to stop the server");
     printf("========================================\n");
-    
-    // Main server loop
-    while (running) {
-        // Use original server event processing
+
+    if (system.config.enable_optimization) {
+        printf("[OPTIMIZER] Target Pool Size: %d\n", system.config.thread_count * 2);
+        printf("[OPTIMIZER] Threads: %d\n", system.config.thread_count);
+    }
+
+    if (iouring_available()) {
+        printf("[ENGINE] io_uring available - using async I/O\n");
+    } else {
+        printf("[ENGINE] io_uring not available - using epoll\n");
+    }
+
+    if (system.config.enable_zero_copy) {
+        printf("[ENGINE] Zero-copy networking enabled\n");
+    }
+
+    while (running && !iouring_global_stop) {
         server_process_events(&system.server);
-        
-        if (system.config.enable_optimization) {
-            optimizer_run(&system.server);
+
+        if (signal_pipe[0] >= 0) {
+            char c;
+            ssize_t n = read(signal_pipe[0], &c, 1);
+            if (n > 0 && !running) break;
+            if (n > 0 && c == 2) {
+                printf("[SIGNAL] SIGHUP received — hot reloading...\n");
+                prompt_router_hot_reload();
+            }
         }
-        
+
+        if (system.config.enable_optimization) optimizer_run(&system.server);
         stats_auto_save();
-        
-        // Check for configuration changes
         check_config_reload(&system);
-        
-        // Use nanosleep instead of usleep
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 100000000; 
-        nanosleep(&ts, NULL);
     }
-    
-    printf("\n🛑 Shutting down AIONIC Server...\n");
-    
-    // Clean up resources on exit
+
+    printf("\n[SHUTDOWN] Shutting down AIONIC Server...\n");
     cleanup_components(&system);
-    
-    if (system.inotify_fd != -1) {
-        close(system.inotify_fd);
-    }
-    
+    if (system.inotify_fd != -1) close(system.inotify_fd);
     config_paths_cleanup(&system.config_paths);
     thread_pool_cleanup(&system.thread_pool);
-    
-    printf("✅ AIONIC Server stopped gracefully\n");
+    if (signal_pipe[0] >= 0) close(signal_pipe[0]);
+    if (signal_pipe[1] >= 0) close(signal_pipe[1]);
+
+    printf("[SHUTDOWN] AIONIC Server stopped gracefully\n");
     printf("========================================\n");
-    
     return 0;
 }

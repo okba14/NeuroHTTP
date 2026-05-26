@@ -11,6 +11,7 @@
 // ====== Project Headers ======
 #include "plugin.h"
 #include "utils.h"
+#include "asm_utils.h"
 
 
 typedef struct {
@@ -20,6 +21,7 @@ typedef struct {
     int (*init)(void);
     int (*process)(void *, void *);
     void (*cleanup)(void);
+    int (*hook_func)(int, void *);        /* New hook system */
     int is_loaded;
     int is_enabled;
 } Plugin;
@@ -44,9 +46,10 @@ static int load_plugin(const char *plugin_path) {
     int (*init)(void) = dlsym(handle, "plugin_init");
     int (*process)(void *, void *) = dlsym(handle, "plugin_process");
     void (*cleanup)(void) = dlsym(handle, "plugin_cleanup");
+    int (*hook_func)(int, void *) = dlsym(handle, "plugin_hook");
     
-    if (!init || !process || !cleanup) {
-        log_message("PLUGIN", "Plugin missing required functions");
+    if (!init || !cleanup) {
+        log_message("PLUGIN", "Plugin missing required functions (plugin_init, plugin_cleanup)");
         dlclose(handle);
         return -1;
     }
@@ -82,6 +85,7 @@ static int load_plugin(const char *plugin_path) {
     plugin->init = init;
     plugin->process = process;
     plugin->cleanup = cleanup;
+    plugin->hook_func = hook_func;
     plugin->is_loaded = 1;
     plugin->is_enabled = 1;
     
@@ -235,7 +239,7 @@ int plugin_process_request(void *request, void *response) {
     for (int i = 0; i < global_plugin_manager.plugin_count; i++) {
         Plugin *plugin = &global_plugin_manager.plugins[i];
         
-        if (plugin->is_loaded && plugin->is_enabled) {
+        if (plugin->is_loaded && plugin->is_enabled && plugin->process) {
             int plugin_result = plugin->process(request, response);
             if (plugin_result != 0) {
                 result = plugin_result;
@@ -244,8 +248,26 @@ int plugin_process_request(void *request, void *response) {
                 snprintf(log_msg, sizeof(log_msg), "Plugin %s returned error: %d", 
                         plugin->name, plugin_result);
                 log_message("PLUGIN", log_msg);
-                
-                // break;
+            }
+        }
+    }
+    
+    pthread_mutex_unlock(&global_plugin_manager.mutex);
+    return result;
+}
+
+int plugin_process_hooks(PluginHookPoint point, PluginContext *ctx) {
+    pthread_mutex_lock(&global_plugin_manager.mutex);
+    
+    int result = 0;
+    
+    for (int i = 0; i < global_plugin_manager.plugin_count; i++) {
+        Plugin *plugin = &global_plugin_manager.plugins[i];
+        
+        if (plugin->is_loaded && plugin->is_enabled && plugin->hook_func) {
+            int plugin_result = plugin->hook_func((int)point, ctx);
+            if (plugin_result != 0) {
+                result = plugin_result;
             }
         }
     }

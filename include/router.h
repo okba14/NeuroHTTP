@@ -46,9 +46,12 @@ void router_cleanup(void);
 
 // Route handlers
 int handle_chat_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
+int handle_models_request(Server *server, HTTPRequest *request, RouteResponse *response);
 int handle_stats_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
 int handle_health_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
 int handle_root_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
+int handle_metrics_request(Server *server, HTTPRequest *request, RouteResponse *response);
+int handle_providers_request(Server *server, HTTPRequest *request, RouteResponse *response);
 
 // Optimization functions
 int register_middleware(MiddlewareFunc middleware);

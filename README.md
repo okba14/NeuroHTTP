@@ -4,6 +4,9 @@
   <img src="https://img.shields.io/badge/language-C%20%2B%20ASM-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" />
   <img src="https://img.shields.io/badge/SIMD-SSE4.2%2FAVX2%2FAVX512-orange?style=flat-square" />
+  <img src="https://img.shields.io/badge/TLS%201.3-OpenSSL%203.6-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/HTTP%2F2-nghttp2%201.69-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/io_uring-Linux%206.19-purple?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
 </p>
 
@@ -46,6 +49,7 @@
 
 ### ⚡ Performance Core
 - **Event-driven engine** — single-threaded epoll edge-triggered event loop with io_uring detection
+- **io_uring async I/O** — full io_uring integration for zero-syscall I/O; falls back to epoll gracefully; SQPOLL support (Linux 5.11+)
 - **Hand-written ASM** — CRC32 (SSE4.2), JSON tokenizer (SSE2/AVX2), memory copy (SSE2–AVX-512), non-temporal stores
 - **Zero-copy I/O** — `sendfile`/`splice` support for efficient static file serving
 - **Memory arena allocator** — bump allocation + slab allocator for lock-free per-request memory
@@ -72,10 +76,16 @@
 - **Dynamic request buffer** — no fixed-size limits on request bodies
 
 ### 🌐 Networking
+- **TLS 1.3** — full TLS 1.3 support via OpenSSL 3.6 (or BoringSSL); OCSP stapling, ALPN negotiation, HSTS headers
+- **HTTP/2** — h2 over TLS (ALPN) + h2c cleartext upgrade via nghttp2; multiplexed streams, server push, flow control
 - **HTTP/1.1 keep-alive** — connection reuse with configurable timeout
 - **Server-Sent Events (SSE)** — streaming endpoint at `/v1/chat/stream`
 - **TCP defer accept** — reduced accept overhead
 - **Configurable SSL verification**
+
+### 🛡️ Graceful Shutdown
+- **Connection draining** — on SIGTERM/SIGINT, stops accepting new connections, drains active connections (with configurable timeout), then cleans up resources
+- **Signal handling** — SIGUSR1 triggers OCSP refresh, SIGHUP reloads API keys
 
 ---
 
@@ -101,13 +111,13 @@
 ```bash
 # Ubuntu / Debian
 sudo apt-get update
-sudo apt-get install -y build-essential nasm libcurl4-openssl-dev
+sudo apt-get install -y build-essential nasm libcurl4-openssl-dev libssl-dev libnghttp2-dev liburing-dev
 
 # Fedora / RHEL
-sudo dnf install -y gcc nasm libcurl-devel
+sudo dnf install -y gcc nasm libcurl-devel openssl-devel libnghttp2-devel liburing-devel
 
 # Arch Linux
-sudo pacman -S --noconfirm gcc nasm libcurl-compat
+sudo pacman -S --noconfirm gcc nasm libcurl-compat openssl nghttp2 liburing
 
 # Verify NASM is installed (required for assembly files)
 nasm --version   # Should output NASM version 2.x+
@@ -153,16 +163,23 @@ make run-debug
 The server will display:
 ```
 ========================================
-    AIONIC AI Web Server v1.1.0
+    AIONIC AI Web Server v2.0.0
+========================================
+Build: May 29 2026
+Features: TLS1.3 HTTP/2 io_uring OCSP
 ========================================
     - Port: 8080
+    - TLS Port: 8443
     - Threads: 4
+    - Max Connections: 1024
     - io_uring: enabled
     - Zero-Copy: enabled
+    - TLS: disabled
+    - HTTP/2: enabled
     - Smart Routing: enabled
     - Streaming: enabled
+    - Graceful Shutdown Timeout: 30s
 ========================================
-```
 
 ---
 
@@ -199,10 +216,33 @@ verify_ssl = 1                 # Verify SSL certificates for upstream AI endpoin
 api_key = your-secret-api-key-here  # Server-wide API key for client authentication
 ```
 
-### Engine Settings (New)
+### TLS / HTTPS Settings (v2.0.0)
 
 ```ini
-enable_iouring = 1             # Enable io_uring detection (falls back to epoll)
+enable_tls = 0                      # Enable TLS 1.3 HTTPS (requires cert and key)
+tls_port = 8443                     # HTTPS listen port
+tls_cert_file = config/cert.pem     # TLS certificate path (PEM)
+tls_key_file = config/key.pem       # TLS private key path (PEM)
+tls_ca_file = config/ca.pem         # CA bundle for OCSP (optional)
+tls_enable_ocsp = 0                 # Enable OCSP stapling
+tls_ocsp_refresh_interval = 3600    # OCSP refresh interval in seconds
+tls_hsts_max_age = 31536000         # HSTS max-age in seconds (1 year)
+```
+
+### HTTP/2 Settings (v2.0.0)
+
+```ini
+enable_http2 = 1                    # Enable HTTP/2 (h2 via TLS ALPN + h2c upgrade)
+http2_max_concurrent_streams = 256  # Max concurrent streams per connection
+http2_max_header_list_size = 65536  # Max header list size
+http2_initial_window_size = 65535   # Initial flow-control window size
+http2_max_frame_size = 16384        # Max frame size
+```
+
+### Engine Settings
+
+```ini
+enable_iouring = 1             # Enable io_uring async I/O (falls back to epoll)
 enable_zero_copy = 1           # Enable sendfile/splice zero-copy I/O
 enable_ratelimiter = 1         # Enable per-IP rate limiting
 rate_limit_rps = 100           # Max requests per second per IP
@@ -557,7 +597,9 @@ NeuroHTTP/
 ├── src/                    # C source files
 │   ├── main.c              # Entry point, signal handling, init loop
 │   ├── server.c            # HTTP server, connection management, event loop integration
-│   ├── iouring_engine.c    # Epoll-based event loop with io_uring detection
+│   ├── iouring_engine.c    # io_uring async I/O engine with epoll fallback
+│   ├── tls.c               # TLS 1.3 wrapper (OpenSSL 3.6 / BoringSSL), OCSP stapling, ALPN
+│   ├── http2.c             # HTTP/2 session management via nghttp2 (h2 + h2c)
 │   ├── router.c            # Hash-table route dispatcher with middleware
 │   ├── http_parser.c       # State-machine HTTP/1.1 parser
 │   ├── config.c            # Configuration file parser
@@ -580,6 +622,9 @@ NeuroHTTP/
 │       ├── json_fast.s     # JSON tokenizer (SSE2/AVX2)
 │       └── memcpy_asm.s    # Memory copy (SSE2–AVX-512)
 ├── include/                # Header files
+│   ├── tls.h               # TLS 1.3 + OCSP + ALPN API
+│   ├── http2.h             # HTTP/2 session API
+│   └── ...
 ├── config/
 │   └── aionic.conf         # Main configuration file
 ├── plugins/                # Plugin source files
@@ -589,28 +634,44 @@ NeuroHTTP/
 ### Data Flow
 
 ```
-Client → TCP Accept → Event Loop (epoll)
-                         ↓
-                  HTTP Parser (state-machine)
-                         ↓
-                    Firewall (WAF)
-                         ↓
-                  Rate Limiter (token bucket)
-                         ↓
-                    Route Dispatcher
-                         ├── /health → HealthHandler
-                         ├── /v1/models → ModelsHandler
-                         ├── /v1/chat → AI Provider Router
-                         │                ├── Groq
-                         │                ├── OpenAI
-                         │                ├── Anthropic
-                         │                ├── Gemini
-                         │                └── ...
-                         ├── /metrics → PrometheusHandler
-                         ├── /stats → StatsHandler
-                         └── /v1/providers → ProvidersHandler
-                         ↓
-                  Response → send() / sendfile()
+Client → TCP Accept (plain/TLS)
+         │
+         ├── TLS 1.3 handshake (if TLS port)
+         │   ├── OCSP stapling, ALPN negotiation
+         │   └── HSTS headers
+         │
+         ↓
+   Event Loop (epoll / io_uring)
+         │
+         ├── HTTP/2? ──► h2c upgrade or ALPN h2
+         │                   └── nghttp2 session → multiplexed streams
+         │
+         ↓
+    HTTP Parser (state-machine HTTP/1.1 or HTTP/2 frames)
+         ↓
+      Firewall (WAF)
+         ↓
+    Rate Limiter (token bucket)
+         ↓
+      Route Dispatcher
+         ├── /health → HealthHandler
+         ├── /v1/models → ModelsHandler
+         ├── /v1/chat → AI Provider Router
+         │                ├── Groq
+         │                ├── OpenAI
+         │                ├── Anthropic
+         │                ├── Gemini
+         │                └── ...
+         ├── /metrics → PrometheusHandler
+         ├── /stats → StatsHandler
+         └── /v1/providers → ProvidersHandler
+         ↓
+   Response → send() / sendfile() / nghttp2 submit_response()
+         ↓
+   Graceful Shutdown (SIGTERM/SIGINT)
+      ├── Stop accepting new connections
+      ├── Drain active connections (configurable timeout)
+      └── Cleanup resources → exit
 ```
 
 ---

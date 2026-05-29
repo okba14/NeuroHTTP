@@ -31,11 +31,13 @@
 #include "asm_utils.h"
 #include "observability.h"
 #include "arena.h"
+#include "tls.h"
+#include "http2.h"
 
-#define AIONIC_VERSION_MAJOR 1
-#define AIONIC_VERSION_MINOR 1
+#define AIONIC_VERSION_MAJOR 2
+#define AIONIC_VERSION_MINOR 0
 #define AIONIC_VERSION_PATCH 0
-#define AIONIC_VERSION_STRING "1.1.0"
+#define AIONIC_VERSION_STRING "2.0.0"
 #ifndef BUILD_DATE
 #define BUILD_DATE __DATE__
 #endif
@@ -95,6 +97,11 @@ static void handle_signal(int sig) {
             char c = 2;
             write(signal_pipe[1], &c, 1);
         }
+    } else if (sig == SIGUSR1) {
+        if (signal_pipe[1] >= 0) {
+            char c = 3;
+            write(signal_pipe[1], &c, 1);
+        }
     }
 }
 
@@ -110,12 +117,14 @@ static void setup_signal_handling(void) {
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
 
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
     sigaddset(&set, SIGTERM);
     sigaddset(&set, SIGHUP);
+    sigaddset(&set, SIGUSR1);
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }
 
@@ -125,6 +134,7 @@ static void print_version_info(void) {
     printf("========================================\n");
     printf("Build: %s %s\n", BUILD_DATE, BUILD_TIME);
     printf("Git commit: %s\n", GIT_COMMIT);
+    printf("Features: TLS1.3 HTTP/2 io_uring OCSP\n");
     printf("========================================\n");
 }
 
@@ -193,6 +203,11 @@ static void handle_error(AionicError error) {
 }
 
 static int initialize_components(AionicSystem *system) {
+    if (system->config.enable_tls) {
+        tls_global_init();
+        logger_log(&system->logger, LOG_LEVEL_INFO, "TLS 1.3 initialized");
+    }
+
     if (system->config.enable_cache && cache_init(system->config.cache_size, system->config.cache_ttl) != 0) {
         handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_CACHE, "Failed to initialize cache")); return -1;
     }
@@ -241,6 +256,10 @@ static int initialize_components(AionicSystem *system) {
         logger_log(&system->logger, LOG_LEVEL_INFO, "Observability system initialized");
     }
 
+    if (system->config.enable_http2) {
+        logger_log(&system->logger, LOG_LEVEL_INFO, "HTTP/2 support enabled");
+    }
+
     if (server_init(&system->server, &system->config) != 0) {
         handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SERVER, "Failed to initialize server")); return -1;
     }
@@ -252,7 +271,21 @@ static int initialize_components(AionicSystem *system) {
     system->state.server_started = 1;
 
     logger_log(&system->logger, LOG_LEVEL_INFO, "Server started successfully");
-    logger_log(&system->logger, LOG_LEVEL_INFO, "AIONIC Server is running on http://localhost:%d", system->config.port);
+    if (system->config.enable_tls) {
+        logger_log(&system->logger, LOG_LEVEL_INFO, "AIONIC Server is running on https://localhost:%d and http://localhost:%d",
+                   system->config.tls_port, system->config.port);
+    } else {
+        logger_log(&system->logger, LOG_LEVEL_INFO, "AIONIC Server is running on http://localhost:%d", system->config.port);
+    }
+
+    if (system->config.enable_http2) {
+        if (system->config.enable_tls) {
+            logger_log(&system->logger, LOG_LEVEL_INFO, "HTTP/2 support: h2 (TLS) + h2c (cleartext upgrade)");
+        } else {
+            logger_log(&system->logger, LOG_LEVEL_INFO, "HTTP/2 support: h2c (cleartext upgrade)");
+        }
+    }
+
     return 0;
 }
 
@@ -266,6 +299,7 @@ static void cleanup_components(AionicSystem *system) {
     if (system->state.optimizer_initialized) { optimizer_cleanup(); system->state.optimizer_initialized = 0; }
     if (system->state.firewall_initialized) { firewall_cleanup(); system->state.firewall_initialized = 0; }
     if (system->state.cache_initialized) { cache_cleanup(); system->state.cache_initialized = 0; }
+    if (system->config.enable_tls) { tls_global_cleanup(); }
     free_config(&system->config);
 }
 
@@ -287,7 +321,7 @@ static void drop_privileges(void) {
 
 static int config_paths_init(ConfigPaths *paths) {
     paths->config_count = 0; paths->config_capacity = 4;
-    paths->config_paths = malloc(sizeof(char *) * paths->config_capacity);
+    paths->config_paths = malloc(sizeof(char *) * (size_t)paths->config_capacity);
     if (!paths->config_paths) { handle_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_MEMORY, "Failed to allocate memory for config paths")); return -1; }
     return 0;
 }
@@ -355,6 +389,20 @@ static void recover_from_error(AionicError error, AionicSystem *system) {
     printf("[RECOVERY] Completed\n");
 }
 
+static time_t last_ocsp_update = 0;
+
+static void handle_ocsp_refresh(AionicSystem *system) {
+    if (!system->config.enable_tls || !system->config.tls_enable_ocsp) return;
+    time_t now = time(NULL);
+    int interval = system->config.tls_ocsp_refresh_interval > 0 ? system->config.tls_ocsp_refresh_interval : 3600;
+    if (now - last_ocsp_update >= interval) {
+        if (tls_ctx_ocsp_update(system->server.tls_ctx) == 0) {
+            logger_log(&system->logger, LOG_LEVEL_INFO, "OCSP response refreshed");
+        }
+        last_ocsp_update = now;
+    }
+}
+
 int main(int argc, char *argv[]) {
     (void)argc; (void)argv;
     AionicSystem system = {0};
@@ -364,7 +412,7 @@ int main(int argc, char *argv[]) {
     detect_cpu_features();
     setup_signal_handling();
 
-    logger_log(&system.logger, LOG_LEVEL_INFO, "Starting AIONIC Server...");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "Starting AIONIC Server v%s...", AIONIC_VERSION_STRING);
     logger_log(&system.logger, LOG_LEVEL_INFO, "Hardware acceleration support:");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX2: %s", has_avx2_support() ? "Yes" : "No");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - AVX-512: %s", has_avx512_support() ? "Yes" : "No");
@@ -394,12 +442,22 @@ int main(int argc, char *argv[]) {
 
     logger_log(&system.logger, LOG_LEVEL_INFO, "Configuration loaded successfully");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Port: %d", system.config.port);
+    if (system.config.enable_tls) {
+        logger_log(&system.logger, LOG_LEVEL_INFO, "   - TLS Port: %d", system.config.tls_port);
+    }
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Threads: %d", system.config.thread_count);
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Max Connections: %d", system.config.max_connections);
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - io_uring: %s", system.config.enable_iouring ? "enabled" : "disabled");
+    if (system.config.enable_iouring) {
+        logger_log(&system.logger, LOG_LEVEL_INFO, "   - io_uring Queue Depth: %d", system.config.iouring_queue_depth);
+        logger_log(&system.logger, LOG_LEVEL_INFO, "   - io_uring SQPOLL: %s", system.config.iouring_sqpoll ? "enabled" : "disabled");
+    }
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Zero-Copy: %s", system.config.enable_zero_copy ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - TLS: %s", system.config.enable_tls ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - HTTP/2: %s", system.config.enable_http2 ? "enabled" : "disabled");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Smart Routing: %s", system.config.enable_smart_routing ? "enabled" : "disabled");
     logger_log(&system.logger, LOG_LEVEL_INFO, "   - Streaming: %s", system.config.enable_streaming ? "enabled" : "disabled");
+    logger_log(&system.logger, LOG_LEVEL_INFO, "   - Graceful Shutdown Timeout: %ds", system.config.graceful_shutdown_timeout);
 
     if (thread_pool_init(&system.thread_pool, system.config.thread_count) != 0) {
         recover_from_error(AIONIC_ERROR_CREATE(AIONIC_ERROR_SYSTEM, "Failed to initialize thread pool"), &system);
@@ -436,22 +494,47 @@ int main(int argc, char *argv[]) {
         printf("[ENGINE] Zero-copy networking enabled\n");
     }
 
+    if (system.config.enable_tls) {
+        printf("[TLS] HTTPS on port %d, OCSP: %s\n",
+               system.config.tls_port,
+               system.config.tls_enable_ocsp ? "enabled" : "disabled");
+    }
+
+    if (system.config.enable_http2) {
+        if (system.config.enable_tls) {
+            printf("[HTTP2] h2 (TLS ALPN) + h2c (cleartext upgrade) enabled\n");
+        } else {
+            printf("[HTTP2] h2c (cleartext upgrade) enabled\n");
+        }
+    }
+
+    printf("[SHUTDOWN] Graceful shutdown timeout: %ds\n", system.config.graceful_shutdown_timeout);
+
+    last_ocsp_update = time(NULL);
+
     while (running && !iouring_global_stop) {
         server_process_events(&system.server);
 
         if (signal_pipe[0] >= 0) {
             char c;
             ssize_t n = read(signal_pipe[0], &c, 1);
-            if (n > 0 && !running) break;
+            if (n > 0 && c == 1 && !running) break;
             if (n > 0 && c == 2) {
-                printf("[SIGNAL] SIGHUP received — hot reloading...\n");
+                printf("[SIGNAL] SIGHUP received - hot reloading API keys...\n");
                 prompt_router_hot_reload();
+            }
+            if (n > 0 && c == 3) {
+                printf("[SIGNAL] SIGUSR1 received - refreshing OCSP response...\n");
+                if (system.config.tls_enable_ocsp && system.server.tls_ctx) {
+                    tls_ctx_ocsp_update(system.server.tls_ctx);
+                }
             }
         }
 
         if (system.config.enable_optimization) optimizer_run(&system.server);
         stats_auto_save();
         check_config_reload(&system);
+        handle_ocsp_refresh(&system);
     }
 
     printf("\n[SHUTDOWN] Shutting down AIONIC Server...\n");

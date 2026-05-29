@@ -2,11 +2,11 @@ CC = gcc
 ASM = nasm
 ASMFLAGS = -f elf64
 CFLAGS = -Wall -Wextra -std=c11 -O3 -march=native -mtune=native -flto -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE
-LDFLAGS = -no-pie -flto -lpthread -ldl -lm -lcurl
+LDFLAGS = -no-pie -flto -lpthread -ldl -lm -lcurl -lssl -lcrypto -lnghttp2 -luring
 DEBUG_CFLAGS = -Wall -Wextra -std=c11 -g -O0 -DDEBUG -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE \
                -fsanitize=address -fsanitize=undefined -fstack-protector-strong -fno-omit-frame-pointer
-DEBUG_LDFLAGS = -no-pie -lpthread -ldl -lm -lcurl \
-               -fsanitize=address -fsanitize=undefined -fstack-protector-strong
+DEBUG_LDFLAGS = -no-pie -lpthread -ldl -lm -lcurl -lssl -lcrypto -lnghttp2 -luring \
+                -fsanitize=address -fsanitize=undefined -fstack-protector-strong
 
 SRC_DIR = src
 ASM_DIR = src/asm

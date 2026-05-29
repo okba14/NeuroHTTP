@@ -15,6 +15,8 @@ typedef struct EventLoopConfig {
     int tcp_fastopen;
     int zero_copy;
     int busy_poll;
+    int io_uring_queue_depth;
+    int io_uring_sqpoll;
 } EventLoopConfig;
 
 typedef void (*accept_cb)(EventLoop *el, int fd, void *userdata);
@@ -43,6 +45,7 @@ int event_loop_sendfile(EventLoop *el, int fd, int file_fd, off_t offset, size_t
 int event_loop_splice(EventLoop *el, int fd_in, int fd_out, size_t len);
 void event_loop_stop(EventLoop *el);
 void event_loop_destroy(EventLoop *el);
+void flush_write_queue(EventLoop *el);
 
 extern volatile sig_atomic_t iouring_global_stop;
 int iouring_available(void);

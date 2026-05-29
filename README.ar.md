@@ -4,6 +4,9 @@
   <img src="https://img.shields.io/badge/language-C%20%2B%20ASM-blue?style=flat-square" />
   <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" />
   <img src="https://img.shields.io/badge/SIMD-SSE4.2%2FAVX2%2FAVX512-orange?style=flat-square" />
+  <img src="https://img.shields.io/badge/TLS%201.3-OpenSSL%203.6-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/HTTP%2F2-nghttp2%201.69-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/io_uring-Linux%206.19-purple?style=flat-square" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
 </p>
 
@@ -40,6 +43,7 @@
 
 ### ⚡ نواة أداء فائقة
 - **محرك يعتمد على الأحداث** — حلقة أحداث epoll وحيدة الخيط مع كشف io_uring
+- **io_uring غير متزامن** — تكامل كامل مع io_uring لإدخال/إخراج بدون استدعاءات نظام؛ يتراجع إلى epoll بسلاسة؛ دعم SQPOLL (Linux 5.11+)
 - **Assembly مكتوب يدوياً** — CRC32 (SSE4.2)، محلل JSON (SSE2/AVX2)، نسخ الذاكرة (SSE2–AVX-512)، تعليمات non-temporal
 - **إدخال/إخراج بدون نسخ (Zero-copy)** — دعم `sendfile`/`splice` لخدمة الملفات الثابتة بكفاءة
 - **مخصص ذاكرة (Arena allocator)** — تخصيص سريع بدون قفل لكل طلب
@@ -66,10 +70,16 @@
 - **عازل طلبات ديناميكي** — لا حدود ثابتة على حجم الطلبات
 
 ### 🌐 الشبكات
+- **TLS 1.3** — دعم كامل لـ TLS 1.3 عبر OpenSSL 3.6 (أو BoringSSL)؛ OCSP stapling، مفاوضة ALPN، ترويسات HSTS
+- **HTTP/2** — h2 عبر TLS (ALPN) + h2c عبر الترقية الصريحة بواسطة nghttp2؛ تدفقات متعددة، دفع الخادم، التحكم في التدفق
 - **HTTP/1.1 keep-alive** — إعادة استخدام الاتصال مع مهلة قابلة للتكوين
 - **SSE (Server-Sent Events)** — نقطة نهاية البث المباشر في `/v1/chat/stream`
 - **TCP defer accept** — تقليل حمل القبول
 - **التحقق من SSL قابل للتكوين**
+
+### 🛡️ إيقاف تشغيل آمن (Graceful Shutdown)
+- **تصريف الاتصالات** — عند استقبال SIGTERM/SIGINT، يتوقف عن قبول اتصالات جديدة، يُصرف الاتصالات النشطة (بمهلة قابلة للتكوين)، ثم ينظف الموارد
+- **معالجة الإشارات** — SIGUSR1 يُحدّث OCSP، SIGHUP يُعيد تحميل مفاتيح API
 
 ---
 
@@ -95,13 +105,13 @@
 ```bash
 # Ubuntu / Debian
 sudo apt-get update
-sudo apt-get install -y build-essential nasm libcurl4-openssl-dev
+sudo apt-get install -y build-essential nasm libcurl4-openssl-dev libssl-dev libnghttp2-dev liburing-dev
 
 # Fedora / RHEL
-sudo dnf install -y gcc nasm libcurl-devel
+sudo dnf install -y gcc nasm libcurl-devel openssl-devel libnghttp2-devel liburing-devel
 
 # Arch Linux
-sudo pacman -S --noconfirm gcc nasm libcurl-compat
+sudo pacman -S --noconfirm gcc nasm libcurl-compat openssl nghttp2 liburing
 
 # تأكد من تثبيت NASM (مطلوب لملفات Assembly)
 nasm --version   # يجب أن يظهر الإصدار 2.x+
@@ -147,16 +157,23 @@ make run-debug
 عند التشغيل، سيظهر:
 ```
 ========================================
-    AIONIC AI Web Server v1.1.0
+    AIONIC AI Web Server v2.0.0
+========================================
+Build: May 29 2026
+Features: TLS1.3 HTTP/2 io_uring OCSP
 ========================================
     - Port: 8080
+    - TLS Port: 8443
     - Threads: 4
+    - Max Connections: 1024
     - io_uring: enabled
     - Zero-Copy: enabled
+    - TLS: disabled
+    - HTTP/2: enabled
     - Smart Routing: enabled
     - Streaming: enabled
+    - Graceful Shutdown Timeout: 30s
 ========================================
-```
 
 ---
 
@@ -193,10 +210,33 @@ verify_ssl = 1                 # التحقق من شهادات SSL لمزودي
 api_key = your-secret-api-key-here  # مفتاح API عام للسيرفر للتحقق من هوية العملاء
 ```
 
-### إعدادات المحرك (جديدة)
+### إعدادات TLS / HTTPS (v2.0.0)
 
 ```ini
-enable_iouring = 1             # تفعيل كشف io_uring (يتراجع إلى epoll إذا لم يكن متاحاً)
+enable_tls = 0                      # تفعيل TLS 1.3 HTTPS (يتطلب شهادة ومفتاح)
+tls_port = 8443                     # منفذ استماع HTTPS
+tls_cert_file = config/cert.pem     # مسار شهادة TLS (PEM)
+tls_key_file = config/key.pem       # مسار مفتاح TLS الخاص (PEM)
+tls_ca_file = config/ca.pem         # حزمة CA لـ OCSP (اختياري)
+tls_enable_ocsp = 0                 # تفعيل OCSP stapling
+tls_ocsp_refresh_interval = 3600    # فترة تحديث OCSP بالثواني
+tls_hsts_max_age = 31536000         # أقصى عمر HSTS بالثواني (سنة واحدة)
+```
+
+### إعدادات HTTP/2 (v2.0.0)
+
+```ini
+enable_http2 = 1                    # تفعيل HTTP/2 (h2 عبر ALPN + ترقية h2c)
+http2_max_concurrent_streams = 256  # أقصى تدفقات متزامنة لكل اتصال
+http2_max_header_list_size = 65536  # أقصى حجم لقائمة الترويسات
+http2_initial_window_size = 65535   # حجم نافذة التحكم في التدفق الأولي
+http2_max_frame_size = 16384        # أقصى حجم للإطار
+```
+
+### إعدادات المحرك
+
+```ini
+enable_iouring = 1             # تفعيل io_uring غير المتزامن (يتراجع إلى epoll)
 enable_zero_copy = 1           # تفعيل الإدخال/الإخراج بدون نسخ (sendfile/splice)
 enable_ratelimiter = 1         # تفعيل تحديد معدل الطلبات لكل IP
 rate_limit_rps = 100           # الحد الأقصى للطلبات في الثانية لكل IP
@@ -555,7 +595,9 @@ NeuroHTTP/
 ├── src/                    # ملفات مصدر C
 │   ├── main.c              # نقطة الدخول، معالجة الإشارات، حلقة التهيئة
 │   ├── server.c            # خادم HTTP، إدارة الاتصالات، تكامل حلقة الأحداث
-│   ├── iouring_engine.c    # حلقة أحداث epoll مع كشف io_uring
+│   ├── iouring_engine.c    # محرك io_uring غير متزامن مع احتياطي epoll
+│   ├── tls.c               # غلاف TLS 1.3 (OpenSSL 3.6 / BoringSSL)، OCSP stapling، ALPN
+│   ├── http2.c             # إدارة جلسات HTTP/2 عبر nghttp2 (h2 + h2c)
 │   ├── router.c            # موزع المسارات بجدول تجزئة مع middleware
 │   ├── http_parser.c       # محلل HTTP/1.1 بحالة آلية
 │   ├── config.c            # محلل ملف الإعدادات
@@ -578,6 +620,9 @@ NeuroHTTP/
 │       ├── json_fast.s     # محلل JSON (SSE2/AVX2)
 │       └── memcpy_asm.s    # نسخ الذاكرة (SSE2–AVX-512)
 ├── include/                # ملفات الرأس
+│   ├── tls.h               # واجهة TLS 1.3 + OCSP + ALPN
+│   ├── http2.h             # واجهة جلسات HTTP/2
+│   └── ...
 ├── config/
 │   └── aionic.conf         # ملف الإعدادات الرئيسي
 ├── plugins/                # ملفات مصدر الإضافات
@@ -587,28 +632,44 @@ NeuroHTTP/
 ### تدفق البيانات
 
 ```
-عميل → TCP Accept → حلقة الأحداث (epoll)
-                         ↓
-                  محلل HTTP (حالة آلية)
-                         ↓
-                    جدار النار (WAF)
-                         ↓
-                  محدد معدل الطلبات
-                         ↓
-                    موزع المسارات
-                         ├── /health → معالج الصحة
-                         ├── /v1/models → معالج النماذج
-                         ├── /v1/chat → موجه مزود AI
-                         │                ├── Groq
-                         │                ├── OpenAI
-                         │                ├── Anthropic
-                         │                ├── Gemini
-                         │                └── ...
-                         ├── /metrics → معالج Prometheus
-                         ├── /stats → معالج الإحصائيات
-                         └── /v1/providers → معالج المزودين
-                         ↓
-                  رد → send() / sendfile()
+عميل → TCP Accept (عادي / TLS)
+         │
+         ├── مصافحة TLS 1.3 (إذا كان منفذ TLS)
+         │   ├── OCSP stapling، مفاوضة ALPN
+         │   └── ترويسات HSTS
+         │
+         ↓
+   حلقة الأحداث (epoll / io_uring)
+         │
+         ├── HTTP/2؟ ──► ترقية h2c أو ALPN h2
+         │                   └── جلسة nghttp2 → تدفقات متعددة
+         │
+         ↓
+    محلل HTTP (حالة آلية HTTP/1.1 أو إطارات HTTP/2)
+         ↓
+      جدار النار (WAF)
+         ↓
+    محدد معدل الطلبات
+         ↓
+      موزع المسارات
+         ├── /health → معالج الصحة
+         ├── /v1/models → معالج النماذج
+         ├── /v1/chat → موجه مزود AI
+         │                ├── Groq
+         │                ├── OpenAI
+         │                ├── Anthropic
+         │                ├── Gemini
+         │                └── ...
+         ├── /metrics → معالج Prometheus
+         ├── /stats → معالج الإحصائيات
+         └── /v1/providers → معالج المزودين
+         ↓
+   رد → send() / sendfile() / nghttp2 submit_response()
+         ↓
+   إيقاف تشغيل آمن (SIGTERM/SIGINT)
+      ├── التوقف عن قبول اتصالات جديدة
+      ├── تصريف الاتصالات النشطة (مدة قابلة للتكوين)
+      └── تنظيف الموارد → خروج
 ```
 
 ---

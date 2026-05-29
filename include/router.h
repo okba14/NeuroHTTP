@@ -52,6 +52,7 @@ int handle_health_request(Server *server, HTTPRequest *request, RouteResponse *r
 int handle_root_request(Server *server, HTTPRequest *request, RouteResponse *response); // Updated signature
 int handle_metrics_request(Server *server, HTTPRequest *request, RouteResponse *response);
 int handle_providers_request(Server *server, HTTPRequest *request, RouteResponse *response);
+int handle_embeddings_request(Server *server, HTTPRequest *request, RouteResponse *response);
 
 // Optimization functions
 int register_middleware(MiddlewareFunc middleware);

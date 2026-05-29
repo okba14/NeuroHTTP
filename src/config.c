@@ -17,6 +17,15 @@ static char *trim_whitespace(char *str) {
     return str;
 }
 
+static int parse_int(const char *s, int default_val) {
+    if (!s || !*s) return default_val;
+    char *end = NULL;
+    long val = strtol(s, &end, 10);
+    if (end == s || *end != '\0') return default_val;
+    if (val < 0 || val > 2147483647) return default_val;
+    return (int)val;
+}
+
 static int parse_config_line(const char *line, Config *config) {
     char *line_copy = strdup(line);
     if (!line_copy) return -1;
@@ -27,60 +36,63 @@ static int parse_config_line(const char *line, Config *config) {
     key = trim_whitespace(key);
     value = trim_whitespace(value);
 
-    if (strcmp(key, "port") == 0) config->port = atoi(value);
-    else if (strcmp(key, "tls_port") == 0) config->tls_port = atoi(value);
-    else if (strcmp(key, "thread_count") == 0) config->thread_count = atoi(value);
-    else if (strcmp(key, "max_connections") == 0) config->max_connections = atoi(value);
-    else if (strcmp(key, "request_timeout") == 0) config->request_timeout = atoi(value);
-    else if (strcmp(key, "buffer_size") == 0) config->buffer_size = atoi(value);
-    else if (strcmp(key, "log_file") == 0) { free(config->log_file); config->log_file = strdup(value); }
-    else if (strcmp(key, "enable_cache") == 0) config->enable_cache = atoi(value);
-    else if (strcmp(key, "cache_size") == 0) config->cache_size = atoi(value);
-    else if (strcmp(key, "cache_ttl") == 0) config->cache_ttl = atoi(value);
-    else if (strcmp(key, "enable_firewall") == 0) config->enable_firewall = atoi(value);
-    else if (strcmp(key, "enable_optimization") == 0) config->enable_optimization = atoi(value);
+    if (strcmp(key, "port") == 0) config->port = parse_int(value, 8080);
+    else if (strcmp(key, "tls_port") == 0) config->tls_port = parse_int(value, 8443);
+    else if (strcmp(key, "thread_count") == 0) config->thread_count = parse_int(value, 4);
+    else if (strcmp(key, "max_connections") == 0) config->max_connections = parse_int(value, 1024);
+    else if (strcmp(key, "request_timeout") == 0) config->request_timeout = parse_int(value, 30000);
+    else if (strcmp(key, "buffer_size") == 0) config->buffer_size = parse_int(value, 8192);
+    else if (strcmp(key, "log_file") == 0) { free(config->log_file); config->log_file = value ? strdup(value) : NULL; }
+    else if (strcmp(key, "enable_cache") == 0) config->enable_cache = parse_int(value, 1);
+    else if (strcmp(key, "cache_size") == 0) config->cache_size = parse_int(value, 1000);
+    else if (strcmp(key, "cache_ttl") == 0) config->cache_ttl = parse_int(value, 3600);
+    else if (strcmp(key, "enable_firewall") == 0) config->enable_firewall = parse_int(value, 1);
+    else if (strcmp(key, "enable_optimization") == 0) config->enable_optimization = parse_int(value, 1);
     else if (strcmp(key, "api_key") == 0) {
-        if (config->api_key_count < 64) config->api_keys[config->api_key_count++] = strdup(value);
-    } else if (strcmp(key, "max_request_size") == 0) config->max_request_size = atoi(value);
-    else if (strcmp(key, "verify_ssl") == 0) config->verify_ssl = atoi(value);
-    else if (strcmp(key, "enable_iouring") == 0) config->enable_iouring = atoi(value);
-    else if (strcmp(key, "iouring_queue_depth") == 0) config->iouring_queue_depth = atoi(value);
-    else if (strcmp(key, "iouring_sqpoll") == 0) config->iouring_sqpoll = atoi(value);
-    else if (strcmp(key, "enable_zero_copy") == 0) config->enable_zero_copy = atoi(value);
-    else if (strcmp(key, "enable_ratelimiter") == 0) config->enable_ratelimiter = atoi(value);
-    else if (strcmp(key, "rate_limit_rps") == 0) config->rate_limit_rps = atoi(value);
-    else if (strcmp(key, "enable_observability") == 0) config->enable_observability = atoi(value);
-    else if (strcmp(key, "enable_streaming") == 0) config->enable_streaming = atoi(value);
-    else if (strcmp(key, "enable_smart_routing") == 0) config->enable_smart_routing = atoi(value);
-    else if (strcmp(key, "enable_keepalive") == 0) config->enable_keepalive = atoi(value);
-    else if (strcmp(key, "keepalive_timeout") == 0) config->keepalive_timeout = atoi(value);
-    else if (strcmp(key, "worker_threads") == 0) config->worker_threads = atoi(value);
-    else if (strcmp(key, "enable_tls") == 0) config->enable_tls = atoi(value);
+        if (config->api_key_count < 64) {
+            char *dup = strdup(value);
+            if (dup) config->api_keys[config->api_key_count++] = dup;
+        }
+    } else if (strcmp(key, "max_request_size") == 0) config->max_request_size = parse_int(value, 33554432);
+    else if (strcmp(key, "verify_ssl") == 0) config->verify_ssl = parse_int(value, 1);
+    else if (strcmp(key, "enable_iouring") == 0) config->enable_iouring = parse_int(value, 1);
+    else if (strcmp(key, "iouring_queue_depth") == 0) config->iouring_queue_depth = parse_int(value, 512);
+    else if (strcmp(key, "iouring_sqpoll") == 0) config->iouring_sqpoll = parse_int(value, 0);
+    else if (strcmp(key, "enable_zero_copy") == 0) config->enable_zero_copy = parse_int(value, 1);
+    else if (strcmp(key, "enable_ratelimiter") == 0) config->enable_ratelimiter = parse_int(value, 0);
+    else if (strcmp(key, "rate_limit_rps") == 0) config->rate_limit_rps = parse_int(value, 100);
+    else if (strcmp(key, "enable_observability") == 0) config->enable_observability = parse_int(value, 1);
+    else if (strcmp(key, "enable_streaming") == 0) config->enable_streaming = parse_int(value, 1);
+    else if (strcmp(key, "enable_smart_routing") == 0) config->enable_smart_routing = parse_int(value, 1);
+    else if (strcmp(key, "enable_keepalive") == 0) config->enable_keepalive = parse_int(value, 1);
+    else if (strcmp(key, "keepalive_timeout") == 0) config->keepalive_timeout = parse_int(value, 30);
+    else if (strcmp(key, "worker_threads") == 0) config->worker_threads = parse_int(value, 4);
+    else if (strcmp(key, "enable_tls") == 0) config->enable_tls = parse_int(value, 0);
     else if (strcmp(key, "tls_cert_file") == 0) strncpy(config->tls_cert_file, value, sizeof(config->tls_cert_file) - 1);
     else if (strcmp(key, "tls_key_file") == 0) strncpy(config->tls_key_file, value, sizeof(config->tls_key_file) - 1);
     else if (strcmp(key, "tls_ca_file") == 0) strncpy(config->tls_ca_file, value, sizeof(config->tls_ca_file) - 1);
     else if (strcmp(key, "tls_ca_path") == 0) strncpy(config->tls_ca_path, value, sizeof(config->tls_ca_path) - 1);
     else if (strcmp(key, "tls_cipher_list") == 0) strncpy(config->tls_cipher_list, value, sizeof(config->tls_cipher_list) - 1);
     else if (strcmp(key, "tls_ciphersuites_tls13") == 0) strncpy(config->tls_ciphersuites_tls13, value, sizeof(config->tls_ciphersuites_tls13) - 1);
-    else if (strcmp(key, "tls_min_version") == 0) config->tls_min_version = atoi(value);
-    else if (strcmp(key, "tls_prefer_server_ciphers") == 0) config->tls_prefer_server_ciphers = atoi(value);
-    else if (strcmp(key, "tls_verify_client") == 0) config->tls_verify_client = atoi(value);
-    else if (strcmp(key, "tls_verify_depth") == 0) config->tls_verify_depth = atoi(value);
-    else if (strcmp(key, "tls_enable_ocsp") == 0) config->tls_enable_ocsp = atoi(value);
-    else if (strcmp(key, "tls_ocsp_refresh_interval") == 0) config->tls_ocsp_refresh_interval = atoi(value);
-    else if (strcmp(key, "tls_session_cache_size") == 0) config->tls_session_cache_size = atoi(value);
-    else if (strcmp(key, "tls_enable_renegotiation") == 0) config->tls_enable_renegotiation = atoi(value);
-    else if (strcmp(key, "tls_enable_early_data") == 0) config->tls_enable_early_data = atoi(value);
-    else if (strcmp(key, "tls_hsts_max_age") == 0) config->tls_hsts_max_age = atoi(value);
-    else if (strcmp(key, "tls_hsts_include_subdomains") == 0) config->tls_hsts_include_subdomains = atoi(value);
+    else if (strcmp(key, "tls_min_version") == 0) config->tls_min_version = parse_int(value, 2);
+    else if (strcmp(key, "tls_prefer_server_ciphers") == 0) config->tls_prefer_server_ciphers = parse_int(value, 1);
+    else if (strcmp(key, "tls_verify_client") == 0) config->tls_verify_client = parse_int(value, 0);
+    else if (strcmp(key, "tls_verify_depth") == 0) config->tls_verify_depth = parse_int(value, 10);
+    else if (strcmp(key, "tls_enable_ocsp") == 0) config->tls_enable_ocsp = parse_int(value, 0);
+    else if (strcmp(key, "tls_ocsp_refresh_interval") == 0) config->tls_ocsp_refresh_interval = parse_int(value, 3600);
+    else if (strcmp(key, "tls_session_cache_size") == 0) config->tls_session_cache_size = parse_int(value, 2048);
+    else if (strcmp(key, "tls_enable_renegotiation") == 0) config->tls_enable_renegotiation = parse_int(value, 0);
+    else if (strcmp(key, "tls_enable_early_data") == 0) config->tls_enable_early_data = parse_int(value, 0);
+    else if (strcmp(key, "tls_hsts_max_age") == 0) config->tls_hsts_max_age = parse_int(value, 31536000);
+    else if (strcmp(key, "tls_hsts_include_subdomains") == 0) config->tls_hsts_include_subdomains = parse_int(value, 1);
     else if (strcmp(key, "tls_alpn_protocols") == 0) strncpy(config->tls_alpn_protocols, value, sizeof(config->tls_alpn_protocols) - 1);
-    else if (strcmp(key, "enable_http2") == 0) config->enable_http2 = atoi(value);
-    else if (strcmp(key, "http2_max_concurrent_streams") == 0) config->http2_max_concurrent_streams = atoi(value);
-    else if (strcmp(key, "http2_max_header_list_size") == 0) config->http2_max_header_list_size = atoi(value);
-    else if (strcmp(key, "http2_initial_window_size") == 0) config->http2_initial_window_size = atoi(value);
-    else if (strcmp(key, "http2_max_frame_size") == 0) config->http2_max_frame_size = atoi(value);
-    else if (strcmp(key, "http2_enable_push") == 0) config->http2_enable_push = atoi(value);
-    else if (strcmp(key, "graceful_shutdown_timeout") == 0) config->graceful_shutdown_timeout = atoi(value);
+    else if (strcmp(key, "enable_http2") == 0) config->enable_http2 = parse_int(value, 1);
+    else if (strcmp(key, "http2_max_concurrent_streams") == 0) config->http2_max_concurrent_streams = parse_int(value, 256);
+    else if (strcmp(key, "http2_max_header_list_size") == 0) config->http2_max_header_list_size = parse_int(value, 65536);
+    else if (strcmp(key, "http2_initial_window_size") == 0) config->http2_initial_window_size = parse_int(value, 65535);
+    else if (strcmp(key, "http2_max_frame_size") == 0) config->http2_max_frame_size = parse_int(value, 16384);
+    else if (strcmp(key, "http2_enable_push") == 0) config->http2_enable_push = parse_int(value, 0);
+    else if (strcmp(key, "graceful_shutdown_timeout") == 0) config->graceful_shutdown_timeout = parse_int(value, 30);
     else if (strcmp(key, "ai_model") == 0) {
         AIModelConfig *new_models = realloc(config->ai_models, sizeof(AIModelConfig) * (config->ai_model_count + 1));
         if (new_models) {
@@ -88,16 +100,17 @@ static int parse_config_line(const char *line, Config *config) {
             AIModelConfig *m = &config->ai_models[config->ai_model_count];
             memset(m, 0, sizeof(AIModelConfig));
             char *val_copy = strdup(value);
+            if (!val_copy) { free(line_copy); return -1; }
             char *p = val_copy, *next;
             next = strchr(p, '|'); if (next) { *next = '\0'; m->name = strdup(p); p = next + 1; }
             next = strchr(p, '|'); if (next) { *next = '\0'; m->api_endpoint = strdup(p); p = next + 1; }
             next = strchr(p, '|'); if (next) { *next = '\0'; m->api_key_env = strdup(p); p = next + 1; }
-            next = strchr(p, '|'); if (next) { *next = '\0'; m->max_tokens = atoi(p); p = next + 1; }
+            next = strchr(p, '|'); if (next) { *next = '\0'; m->max_tokens = parse_int(p, 4096); p = next + 1; }
             m->temperature = atof(p);
             char *tsep = strchr(p, '|');
             if (tsep) {
                 p = tsep + 1;
-                m->tier = atoi(p);
+                m->tier = parse_int(p, 2);
             } else {
                 m->tier = 2;
             }

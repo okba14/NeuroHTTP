@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <dirent.h>
+#include <unistd.h>
 
 // ====== Project Headers ======
 #include "plugin.h"
@@ -288,6 +289,80 @@ int plugin_get_list(char ***plugin_names, int *count) {
     
     pthread_mutex_unlock(&global_plugin_manager.mutex);
     return 0;
+}
+
+int plugin_install_from_url(const char *url) {
+    if (!url) return -1;
+    char tmp_path[1024];
+    snprintf(tmp_path, sizeof(tmp_path), "/tmp/aionic_plugin_XXXXXX.so");
+    int fd = mkstemps(tmp_path, 3);
+    if (fd < 0) return -1;
+
+    char curl_cmd[2048];
+    snprintf(curl_cmd, sizeof(curl_cmd), "curl -sL -o %s \"%s\"", tmp_path, url);
+    int ret = system(curl_cmd);
+    if (ret != 0) { close(fd); unlink(tmp_path); return -1; }
+
+    ret = load_plugin(tmp_path);
+    close(fd);
+    if (ret != 0) { unlink(tmp_path); return -1; }
+
+    char *plugin_dir = global_plugin_manager.plugin_dir;
+    if (plugin_dir) {
+        const char *name = strrchr(url, '/');
+        if (name) name++; else name = url;
+        char dest[1024];
+        snprintf(dest, sizeof(dest), "%s/%s", plugin_dir, name);
+        rename(tmp_path, dest);
+    }
+
+    log_message("PLUGIN", "Plugin installed from URL");
+    return 0;
+}
+
+int plugin_install_from_github(const char *repo, const char *asset_pattern) {
+    if (!repo || !asset_pattern) return -1;
+    char api_url[512];
+    snprintf(api_url, sizeof(api_url), "https://api.github.com/repos/%s/releases/latest", repo);
+    char curl_cmd[2048];
+    char tmp_json[1024];
+    snprintf(tmp_json, sizeof(tmp_json), "/tmp/gh_release_XXXXXX.json");
+    int fd = mkstemps(tmp_json, 5);
+    if (fd < 0) return -1;
+    close(fd);
+
+    snprintf(curl_cmd, sizeof(curl_cmd),
+        "curl -sL -H \"Accept: application/vnd.github.v3+json\" \"%s\" -o \"%s\"", api_url, tmp_json);
+    int ret = system(curl_cmd);
+    if (ret != 0) { unlink(tmp_json); return -1; }
+
+    char *json_content = read_file(tmp_json);
+    unlink(tmp_json);
+    if (!json_content) return -1;
+
+    char download_url[1024] = {0};
+    const char *p = json_content;
+    while ((p = strstr(p, "\"browser_download_url\"")) != NULL) {
+        p += 22;
+        while (*p && *p != '"') p++;
+        if (*p) p++;
+        const char *url_start = p;
+        const char *url_end = strchr(p, '"');
+        if (!url_end) break;
+        size_t ulen = url_end - url_start;
+        if (ulen < sizeof(download_url) - 1) {
+            memcpy(download_url, url_start, ulen);
+            download_url[ulen] = '\0';
+            if (strstr(download_url, asset_pattern)) break;
+        }
+        p = url_end + 1;
+    }
+    free(json_content);
+
+    if (download_url[0] == '\0') return -1;
+
+    log_message("PLUGIN", "Downloading plugin from GitHub release");
+    return plugin_install_from_url(download_url);
 }
 
 void plugin_cleanup() {

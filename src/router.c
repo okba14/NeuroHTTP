@@ -9,6 +9,7 @@
 #include "parser.h"
 #include "stream.h"
 #include "ai/prompt_router.h"
+#include "ai/ai_gateway.h"
 #include "asm_utils.h"
 #include "utils.h"
 #include "server.h"
@@ -453,6 +454,37 @@ int handle_providers_request(Server *server, HTTPRequest *request, RouteResponse
 
 void router_init(void) { hash_table_init(&routes_table); init_cached_responses(); }
 
+int handle_embeddings_request(Server *server, HTTPRequest *request, RouteResponse *response) {
+    (void)server;
+    if (!response || !request || !request->body) {
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+    }
+    char model_buf[128] = {0};
+    char input_buf[4096] = {0};
+    if (json_get_value(request->body, "model", model_buf, sizeof(model_buf)) != 0) {
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+    }
+    if (json_get_value(request->body, "input", input_buf, sizeof(input_buf)) != 0) {
+        return create_error_response(response, ROUTE_ERROR_INVALID_PARAM, 400);
+    }
+    const char *inputs[1] = { input_buf };
+    char payload[8192];
+    if (gateway_build_embeddings_payload(model_buf, inputs, 1, payload, sizeof(payload)) != 0) {
+        return create_error_response(response, ROUTE_ERROR_INTERNAL, 500);
+    }
+    char ai_response[1048576] = {0};
+    char actual_model[128] = {0};
+    int result = prompt_router_route(input_buf, model_buf, ai_response, sizeof(ai_response), actual_model, sizeof(actual_model));
+    if (result != 0) {
+        return create_error_response(response, ROUTE_ERROR_NOT_FOUND, 502);
+    }
+    char resp_json[2097152];
+    snprintf(resp_json, sizeof(resp_json),
+        "{\"data\": [{\"embedding\": %s, \"index\": 0}], \"model\": \"%s\", \"usage\": {\"prompt_tokens\": %zu}}",
+        ai_response, actual_model, strlen(input_buf) / 4);
+    return create_http_response(response, resp_json, strlen(resp_json), "application/json", 200, "OK");
+}
+
 void router_cleanup(void) {
     free(cached_404_response.data);
     free(cached_root_response.data);
@@ -463,6 +495,7 @@ void init_routes(void) {
     router_init();
     register_route("/v1/chat", HTTP_POST, handle_chat_request);
     register_route("/v1/chat/stream", HTTP_POST, handle_chat_request);
+    register_route("/v1/embeddings", HTTP_POST, handle_embeddings_request);
     register_route("/v1/models", HTTP_GET, handle_models_request);
     register_route("/stats", HTTP_GET, handle_stats_request);
     register_route("/health", HTTP_GET, handle_health_request);

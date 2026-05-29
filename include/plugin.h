@@ -41,6 +41,8 @@ int plugin_process_hooks(PluginHookPoint point, PluginContext *ctx);
 int plugin_process_request(void *request, void *response);
 
 int plugin_get_list(char ***plugin_names, int *count);
+int plugin_install_from_url(const char *url);
+int plugin_install_from_github(const char *repo, const char *asset_pattern);
 void plugin_cleanup();
 
 #endif // AIONIC_PLUGIN_H

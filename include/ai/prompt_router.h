@@ -68,12 +68,15 @@ int prompt_router_add_model_ex(const char *name, const char *api_endpoint, const
 int prompt_router_remove_model(const char *name);
 int prompt_router_set_default_model(const char *name);
 int prompt_router_route(const char *prompt, const char *model_name, char *response, size_t response_size, char *actual_model, size_t actual_model_size);
+int prompt_router_route_with_options(const char *prompt, const char *model_name, char *response, size_t response_size,
+                                      char *actual_model, size_t actual_model_size, int min_tier, int max_cost_cents);
 int prompt_router_get_models(char ***model_names, int *count);
 int prompt_router_get_available_count(void);
 int prompt_router_set_model_availability(const char *name, int is_available);
 int prompt_router_set_model_state(const char *name, ModelState state);
 int prompt_router_get_model_health(const char *name, ModelHealth *health);
 int prompt_router_get_token_account(TokenAccount *account);
+int prompt_router_get_model_cost_account(const char *name, double *cost_usd);
 int prompt_router_hot_reload(void);
 void prompt_router_cleanup(void);
 

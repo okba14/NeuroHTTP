@@ -27,7 +27,7 @@ typedef enum {
 
 typedef struct ConnHashEntry {
     int client_fd;
-    struct ConnectionInfo *info;
+    int conn_index;
     struct ConnHashEntry *next;
 } ConnHashEntry;
 

@@ -31,13 +31,13 @@ typedef struct {
 } FirewallEntry;
 
 typedef struct {
-    char *ip_address;
+    char ip_address[256];
     int permanent;
     time_t expiry_time;
 } WhitelistEntry;
 
 typedef struct {
-    char *ip_address;
+    char ip_address[256];
     BlockReason reason;
     char description[256];
     time_t added_time;

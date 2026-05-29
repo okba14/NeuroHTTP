@@ -64,6 +64,10 @@
 - **Web Application Firewall** — SQLi, XSS, path traversal detection; IP blacklist/whitelist
 - **Token-bucket rate limiter** — per-IP rate limiting with configurable RPS
 - **Request inspection** — suspicious user-agent, payload size limits
+- **Content Moderation** — built-in prompt/response moderation with regex-based filtering (hate speech, harassment, violence, self-harm, PII, malicious code)
+- **Security Headers** — CSP, X-Content-Type-Options, X-Frame-Options on all responses
+- **ASLR + RELRO + Stack Protector** — full binary hardening via PIE, `_FORTIFY_SOURCE=2`, `-fstack-protector-strong`
+- **JSON Injection Protection** — all user prompts properly escaped before insertion into API payloads
 
 ### 📊 Observability
 - **Prometheus metrics** — `/metrics` endpoint for scraping
@@ -71,8 +75,22 @@
 - **Provider stats** — per-provider call count, latency, token usage, error rate
 - **Server stats** — `/stats` endpoint with live metrics
 
+### 🧠 AI Gateway Features
+- **Function Calling** — parse and forward `tools` definitions to OpenAI-compatible providers; detect `tool_calls` in responses
+- **Vision / Multi-modal** — support for image inputs (`image_url`) in chat completions for GPT-4o, Claude 3.5, Gemini 2.0
+- **Structured Outputs** — `response_format` parameter support with JSON schema validation
+- **Embeddings** — `/v1/embeddings` endpoint for generating vector embeddings
+- **Cost-Aware Routing** — routing to cheapest available provider based on real-time per-model cost tracking; cost factor incorporated into model scoring (20% weight)
+
+### 💰 Distributed Caching
+- **In-memory cache** — fast local cache with semantic similarity matching (n-gram based)
+- **Redis backend** — optional Redis distributed caching via `cache_init_redis()`; automatic fallback to in-memory if Redis unavailable
+- **Semantic cache** — fuzzy matching of cached responses for similar prompts
+
 ### 🔌 Extensibility
 - **Plugin system** — 6 hook points (pre-request, post-request, AI prompt, AI response, connect, disconnect)
+- **GitHub Plugin Install** — install plugins directly from GitHub releases via `plugin_install_from_github("owner/repo", "*.so")`
+- **URL Plugin Install** — install plugins from any URL via `plugin_install_from_url()`
 - **Dynamic request buffer** — no fixed-size limits on request bodies
 
 ### 🌐 Networking
@@ -487,6 +505,24 @@ aionic_requests_total 42
 aionic_ai_calls_total 10
 ```
 
+### `POST /v1/embeddings` — Text Embeddings
+
+Generate vector embeddings for text input.
+
+```bash
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"model": "text-embedding-3-small", "input": "Hello world"}'
+```
+
+```json
+{
+  "data": [{"embedding": [0.025, -0.009, ...], "index": 0}],
+  "model": "text-embedding-3-small",
+  "usage": {"prompt_tokens": 3}
+}
+```
+
 ### `GET /v1/providers` — Provider List
 
 Returns the list of configured AI providers.
@@ -571,16 +607,25 @@ Compile: `gcc -fPIC -shared myplugin.c -o build/plugins/myplugin.so`
 
 | Command | Description |
 |---------|-------------|
-| `make` | Build production binary |
+| `make` | Build production binary (PIE, ASLR, RELRO) |
 | `make debug` | Build with AddressSanitizer + UBSan |
 | `make rebuild` | Clean + full rebuild |
 | `make run` | Build and run the server |
 | `make run-debug` | Build and run debug server |
 | `make plugins` | Build plugin `.so` files |
+| `make test` | Build and run main test suite |
+| `make test-all` | Run all test suites (unit, fuzz, integration) |
+| `make test-moderation` | Run content moderation tests |
+| `make test-gateway` | Run AI Gateway tests (function calling, embeddings, vision, cost) |
+| `make test-cache` | Run cache tests (in-memory, semantic) |
+| `make test-firewall` | Run WAF tests (IP blocklist, whitelist, rate limits) |
+| `make test-fuzz` | Run fuzz tests (random payloads, edge cases) |
+| `make test-prompt-router` | Run prompt router tests (routing, cost, model management) |
+| `make coverage` | Run all tests with gcov coverage analysis |
+| `make check-deps` | Check system dependencies (hiredis, libcurl, openssl, nghttp2, nasm) |
 | `make install` | Install to `/usr/local/bin/aionic` |
 | `make uninstall` | Remove installed files |
 | `make clean` | Remove build artifacts |
-| `make test` | Build and run tests |
 | `make benchmark` | Show benchmark command |
 | `make docs` | Generate Doxygen docs |
 | `make analyze` | Run cppcheck static analysis |
@@ -614,7 +659,9 @@ NeuroHTTP/
 │   ├── optimizer.c         # Runtime optimizer
 │   ├── utils.c             # Utility functions
 │   ├── ai/
-│   │   ├── prompt_router.c # Multi-provider AI routing (latency/health-aware)
+│   │   ├── prompt_router.c # Multi-provider AI routing (latency/health/cost-aware)
+│   │   ├── ai_gateway.c    # AI Gateway: function calling, embeddings, vision, cost tracking
+│   │   ├── content_moderation.c # Built-in prompt/response content moderation
 │   │   ├── stats.c         # Per-model statistics
 │   │   └── tokenizer.c     # Token counting
 │   └── asm/

@@ -9,6 +9,10 @@
 #include "cache.h"
 #include "asm_utils.h"
 
+#ifdef HIREDIS_FOUND
+#include <hiredis/hiredis.h>
+#endif
+
 typedef struct {
     CacheEntry *entries;
     int entry_count;
@@ -21,6 +25,12 @@ typedef struct {
 } Cache;
 
 static Cache global_cache;
+static CacheBackend active_backend = CACHE_BACKEND_MEMORY;
+
+#ifdef HIREDIS_FOUND
+static redisContext *redis_ctx = NULL;
+static pthread_mutex_t redis_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 static uint32_t cache_hash(const char *key) {
     return crc32_asm(key, strlen(key));
@@ -61,9 +71,49 @@ static CacheEntry *add_entry(const char *key, const char *value, size_t value_si
     return NULL;
 }
 
-int cache_put(Cache *cache, const char *key, const void *data, size_t size) {
-    (void)cache; (void)key; (void)data; (void)size;
+int cache_init_redis(const char *redis_host, int redis_port, const char *redis_password) {
+#ifdef HIREDIS_FOUND
+    pthread_mutex_lock(&redis_mutex);
+    if (redis_ctx) { redisFree(redis_ctx); redis_ctx = NULL; }
+    struct timeval timeout = { 2, 0 };
+    redis_ctx = redisConnectWithTimeout(redis_host, redis_port, timeout);
+    if (!redis_ctx || redis_ctx->err) {
+        if (redis_ctx) {
+            log_message("CACHE", redis_ctx->errstr);
+            redisFree(redis_ctx);
+            redis_ctx = NULL;
+        } else {
+            log_message("CACHE", "Redis connection failed: can't allocate context");
+        }
+        pthread_mutex_unlock(&redis_mutex);
+        active_backend = CACHE_BACKEND_MEMORY;
+        return -1;
+    }
+    if (redis_password && redis_password[0]) {
+        redisReply *reply = redisCommand(redis_ctx, "AUTH %s", redis_password);
+        if (!reply || reply->type == REDIS_REPLY_ERROR) {
+            if (reply) { freeReplyObject(reply); }
+            redisFree(redis_ctx); redis_ctx = NULL;
+            pthread_mutex_unlock(&redis_mutex);
+            active_backend = CACHE_BACKEND_MEMORY;
+            return -1;
+        }
+        freeReplyObject(reply);
+    }
+    active_backend = CACHE_BACKEND_REDIS;
+    log_message("CACHE", "Redis cache initialized");
+    pthread_mutex_unlock(&redis_mutex);
+    return 0;
+#else
+    (void)redis_host; (void)redis_port; (void)redis_password;
+    log_message("CACHE", "Redis support not compiled (install hiredis)");
+    active_backend = CACHE_BACKEND_MEMORY;
     return -1;
+#endif
+}
+
+CacheBackend cache_active_backend(void) {
+    return active_backend;
 }
 
 int cache_init(int size, int ttl) {
@@ -82,6 +132,18 @@ int cache_init(int size, int ttl) {
 
 int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
     if (!key || !value || value_size == 0) return -1;
+
+#ifdef HIREDIS_FOUND
+    if (active_backend == CACHE_BACKEND_REDIS && redis_ctx) {
+        pthread_mutex_lock(&redis_mutex);
+        redisReply *reply = redisCommand(redis_ctx, "SETEX %s %d %b", key, ttl > 0 ? ttl : 3600, value, value_size);
+        int ret = (reply && reply->type == REDIS_REPLY_STATUS) ? 0 : -1;
+        if (reply) freeReplyObject(reply);
+        pthread_mutex_unlock(&redis_mutex);
+        return ret;
+    }
+#endif
+
     pthread_mutex_lock(&global_cache.mutex);
     CacheEntry *existing = find_entry(key);
     if (existing) { free(existing->key); free(existing->value); global_cache.entry_count--; }
@@ -92,6 +154,25 @@ int cache_set(const char *key, const char *value, size_t value_size, int ttl) {
 
 int cache_get(const char *key, char *value, size_t value_size) {
     if (!key || !value || value_size == 0) return -1;
+
+#ifdef HIREDIS_FOUND
+    if (active_backend == CACHE_BACKEND_REDIS && redis_ctx) {
+        pthread_mutex_lock(&redis_mutex);
+        redisReply *reply = redisCommand(redis_ctx, "GET %s", key);
+        if (!reply || reply->type != REDIS_REPLY_STRING) {
+            if (reply) freeReplyObject(reply);
+            pthread_mutex_unlock(&redis_mutex);
+            return -1;
+        }
+        size_t copy = reply->len < value_size - 1 ? reply->len : value_size - 1;
+        memcpy_asm(value, reply->str, copy);
+        value[copy] = '\0';
+        freeReplyObject(reply);
+        pthread_mutex_unlock(&redis_mutex);
+        return 0;
+    }
+#endif
+
     pthread_mutex_lock(&global_cache.mutex);
     CacheEntry *entry = find_entry(key);
     if (!entry) { global_cache.misses++; pthread_mutex_unlock(&global_cache.mutex); return -1; }

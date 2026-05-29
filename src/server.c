@@ -27,6 +27,8 @@
 #include "config.h"
 #include "plugin.h"
 #include "ai/prompt_router.h"
+#include "ai/content_moderation.h"
+#include "ai/ai_gateway.h"
 #include "observability.h"
 #include "ratelimiter.h"
 #include "arena.h"
@@ -51,6 +53,7 @@ static int b64_decode(const char *in, unsigned char *out, int *outlen) {
         tbl['+'] = 62; tbl['/'] = 63; tbl['-'] = 62; tbl['_'] = 63;
         init = 1;
     }
+    int max_out = *outlen;
     int len = (int)strlen(in);
     while (len > 0 && in[len-1] == '=') len--;
     int o = 0, buf = 0, bits = 0;
@@ -61,6 +64,7 @@ static int b64_decode(const char *in, unsigned char *out, int *outlen) {
         bits += 6;
         if (bits >= 8) {
             bits -= 8;
+            if (o >= max_out) return -1;
             out[o++] = (unsigned char)(buf >> bits);
         }
     }
@@ -108,12 +112,12 @@ static unsigned int conn_hash_fd(int fd) {
     return (unsigned int)(fd * 2654435761U) % CONN_HASH_SIZE;
 }
 
-static void conn_hash_add(int client_fd, ConnectionInfo *info) {
+static void conn_hash_add(int client_fd, int conn_index) {
     unsigned int idx = conn_hash_fd(client_fd);
     ConnHashEntry *e = malloc(sizeof(ConnHashEntry));
     if (!e) return;
     e->client_fd = client_fd;
-    e->info = info;
+    e->conn_index = conn_index;
     e->next = global_conn_hash[idx];
     global_conn_hash[idx] = e;
 }
@@ -149,8 +153,9 @@ static ConnectionInfo *add_connection_info(int client_fd, const char *ip_address
     info->state = CONN_STATE_NEW;
     obs_generate_request_id(info->request_id, sizeof(info->request_id));
     info->request_start_ns = get_current_time_ns();
+    int new_idx = connection_count;
     connection_count++;
-    conn_hash_add(client_fd, info);
+    conn_hash_add(client_fd, new_idx);
     pthread_mutex_unlock(&connection_mutex);
     return info;
 }
@@ -159,12 +164,18 @@ static ConnectionInfo *find_connection_info(int client_fd) {
     unsigned int idx = conn_hash_fd(client_fd);
     ConnHashEntry *e = global_conn_hash[idx];
     while (e) {
-        if (e->client_fd == client_fd) return e->info;
+        if (e->client_fd == client_fd && e->conn_index >= 0 && e->conn_index < connection_count) {
+            if (connections[e->conn_index].client_fd == client_fd)
+                return &connections[e->conn_index];
+        }
         e = e->next;
     }
     pthread_mutex_lock(&connection_mutex);
     for (int i = 0; i < connection_count; i++) {
-        if (connections[i].client_fd == client_fd) { pthread_mutex_unlock(&connection_mutex); return &connections[i]; }
+        if (connections[i].client_fd == client_fd) {
+            conn_hash_add(client_fd, i);
+            pthread_mutex_unlock(&connection_mutex); return &connections[i];
+        }
     }
     pthread_mutex_unlock(&connection_mutex);
     return NULL;
@@ -179,7 +190,11 @@ static void remove_connection_info(int client_fd) {
             if (info->tls_conn) { tls_conn_destroy(info->tls_conn); info->tls_conn = NULL; }
             if (info->h2_session) { h2_session_destroy(info->h2_session); info->h2_session = NULL; }
             free_partial_data(info);
-            if (i < connection_count - 1) connections[i] = connections[connection_count - 1];
+            if (i < connection_count - 1) {
+                int moved_fd = connections[connection_count - 1].client_fd;
+                connections[i] = connections[connection_count - 1];
+                conn_hash_add(moved_fd, i);
+            }
             connection_count--;
             break;
         }
@@ -281,8 +296,9 @@ static int tls_read_request_data(Server *server, ConnectionInfo *info, int clien
             if (cl) {
                 cl += 15;
                 while (*cl && (*cl == ' ' || *cl == ':')) cl++;
-                info->content_length = atoi(cl);
-                if (info->content_length > global_max_request_size) return -2;
+                long cl_val = strtol(cl, NULL, 10);
+                if (cl_val < 0 || cl_val > global_max_request_size) return -2;
+                info->content_length = (int)cl_val;
             }
             size_t header_end_pos = (size_t)((header_end + 4) - info->partial_data);
             size_t body_received = info->partial_size - header_end_pos;
@@ -473,8 +489,14 @@ static int stream_ai_response_worker(Server *server, int client_fd, const char *
     };
     if (stream_init_ex(&stream, client_fd, &sconfig) != 0) return -1;
 
-    char header[1024];
+    char header[2048];
     int header_len;
+    const char *sec_headers =
+        "Content-Security-Policy: default-src 'none'; script-src 'none'; frame-ancestors 'none'\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: DENY\r\n"
+        "X-XSS-Protection: 0\r\n"
+        "Referrer-Policy: no-referrer\r\n";
     if (info->tls_conn) {
         header_len = snprintf(header, sizeof(header),
             "HTTP/1.1 200 OK\r\n"
@@ -482,7 +504,8 @@ static int stream_ai_response_worker(Server *server, int client_fd, const char *
             "Cache-Control: no-cache\r\n"
             "Connection: keep-alive\r\n"
             "Access-Control-Allow-Origin: *\r\n"
-            "\r\n");
+            "%s"
+            "\r\n", sec_headers);
         tls_conn_write(info->tls_conn, header, (size_t)header_len, 5000);
     } else {
         header_len = snprintf(header, sizeof(header),
@@ -491,7 +514,8 @@ static int stream_ai_response_worker(Server *server, int client_fd, const char *
             "Cache-Control: no-cache\r\n"
             "Connection: keep-alive\r\n"
             "Access-Control-Allow-Origin: *\r\n"
-            "\r\n");
+            "%s"
+            "\r\n", sec_headers);
         send(client_fd, header, (size_t)header_len, 0);
     }
 
@@ -506,7 +530,8 @@ static int stream_ai_response_worker(Server *server, int client_fd, const char *
     if (info->tls_conn) tls_conn_write(info->tls_conn, sse_event, strlen(sse_event), 5000);
     else send(client_fd, sse_event, strlen(sse_event), 0);
 
-    char *ai_buf = malloc(65536);
+    size_t ai_buf_size = 1048576;
+    char *ai_buf = malloc(ai_buf_size);
     if (!ai_buf) { stream_cleanup(&stream); return -1; }
     ai_buf[0] = '\0';
 
@@ -514,7 +539,7 @@ static int stream_ai_response_worker(Server *server, int client_fd, const char *
     memset(actual_model, 0, sizeof(actual_model));
 
     uint64_t start = get_current_time_ns();
-    int result = prompt_router_route(prompt, model_name, ai_buf, 65536, actual_model, sizeof(actual_model));
+    int result = prompt_router_route(prompt, model_name, ai_buf, ai_buf_size, actual_model, sizeof(actual_model));
     uint64_t latency_us = (get_current_time_ns() - start) / 1000;
 
     const char *used_model = actual_model[0] ? actual_model : (model_name ? model_name : "default");
@@ -775,6 +800,23 @@ int server_handle_request(Server *server, int client_fd) {
         }
     }
 
+    ModerationDecision mod_dec;
+    if (request.body && request.body_length > 0) {
+        if (moderation_check_prompt(request.body, &mod_dec) > 0) {
+            info->flagged_suspicious = 1;
+            log_message("MODERATION", "Prompt blocked by content moderation");
+            const char *err = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n"
+                "X-Content-Type-Options: nosniff\r\n"
+                "Content-Security-Policy: default-src 'none'\r\n"
+                "\r\n{\"error\": \"Content policy violation\", \"code\": \"content_moderation\"}";
+            if (info->tls_conn) tls_conn_write(info->tls_conn, err, strlen(err), 5000);
+            else send(client_fd, err, strlen(err), 0);
+            free_http_request(&request);
+            free_partial_data(info);
+            return -1;
+        }
+    }
+
     if (server->ratelimiter) {
         if (!ratelimiter_allow(server->ratelimiter, info->ip_address)) {
             const char *err = "HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
@@ -800,10 +842,26 @@ int server_handle_request(Server *server, int client_fd) {
     if (server->use_streaming && (int)request.method == (int)HTTP_POST && request.path &&
         strcmp(request.path, "/v1/chat/stream") == 0) {
         char *prompt = NULL;
-        char *model_name = NULL;
+        char model_name[128] = {0};
         char prompt_buf[16384];
-        if (parse_json(request.body, prompt_buf, sizeof(prompt_buf)) == 0) {
-            prompt = prompt_buf;
+        char model_buf[128] = {0};
+        if (request.body) {
+            if (json_get_value(request.body, "model", model_buf, sizeof(model_buf)) == 0) {
+                strncpy(model_name, model_buf, sizeof(model_name) - 1);
+            }
+            if (parse_json(request.body, prompt_buf, sizeof(prompt_buf)) == 0) {
+                prompt = prompt_buf;
+            }
+            if (!prompt) {
+                if (json_get_value(request.body, "messages", prompt_buf, sizeof(prompt_buf)) == 0) {
+                    prompt = prompt_buf;
+                }
+            }
+            if (!prompt) {
+                if (json_get_value(request.body, "content", prompt_buf, sizeof(prompt_buf)) == 0) {
+                    prompt = prompt_buf;
+                }
+            }
         }
         if (!prompt && request.body) {
             size_t cl = request.body_length < (int)sizeof(prompt_buf) - 1 ? (size_t)request.body_length : sizeof(prompt_buf) - 1;
@@ -812,7 +870,7 @@ int server_handle_request(Server *server, int client_fd) {
             prompt = prompt_buf;
         }
         if (prompt) {
-            int sr = stream_ai_response_worker(server, client_fd, prompt, model_name);
+            int sr = stream_ai_response_worker(server, client_fd, prompt, model_name[0] ? model_name : NULL);
             free_http_request(&request);
             free_partial_data(info);
             uint64_t latency_us = (get_current_time_ns() - request_start) / 1000;
@@ -891,8 +949,9 @@ static int read_request_data_impl(Server *server, ConnectionInfo *info, int clie
             if (cl) {
                 cl += 15;
                 while (*cl && (*cl == ' ' || *cl == ':')) cl++;
-                info->content_length = atoi(cl);
-                if (info->content_length > global_max_request_size) return -2;
+                long cl_val = strtol(cl, NULL, 10);
+                if (cl_val < 0 || cl_val > global_max_request_size) return -2;
+                info->content_length = (int)cl_val;
             }
             size_t header_end_pos = (header_end + 4) - info->partial_data;
             size_t body_received = info->partial_size - header_end_pos;
@@ -1090,6 +1149,9 @@ int server_init(Server *server, const Config *config) {
         firewall_add_attack_pattern("eval(", 9);
         firewall_add_attack_pattern("iframe", 7);
     }
+
+    moderation_init(NULL);
+    log_message("SERVER", "Content moderation initialized");
 
     return 0;
 }

@@ -12,6 +12,7 @@
 #include "asm_utils.h"
 #include "config.h"
 #include "observability.h"
+#include "ai/ai_gateway.h"
 
 #define AI_WORKER_THREADS 4
 #define AI_WORK_QUEUE_SIZE 256
@@ -54,6 +55,8 @@ typedef struct {
     TokenAccount account;
     CURL *cached_curl;
     time_t curl_last_used;
+    CostAccount cost_account;
+    double cost_per_call_avg;
 } AIModel;
 
 typedef struct AIWorkItem {
@@ -90,6 +93,37 @@ static int global_initialized = 0;
 static CURLSH *global_curl_share = NULL;
 
 static int send_to_model(AIModel *model, const char *prompt, char *response, size_t response_size, AIErrorCode *error_code);
+
+char *json_escape(const char *in) {
+    if (!in) return strdup("");
+    size_t len = strlen(in), cap = len * 2 + 8;
+    char *out = malloc(cap);
+    if (!out) return NULL;
+    size_t j = 0;
+    for (size_t i = 0; in[i]; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (j + 8 >= cap) { cap *= 2; char *tmp = realloc(out, cap); if (!tmp) { free(out); return NULL; } out = tmp; }
+        switch (c) {
+            case '"':  out[j++] = '\\'; out[j++] = '"';  break;
+            case '\\': out[j++] = '\\'; out[j++] = '\\'; break;
+            case '\n': out[j++] = '\\'; out[j++] = 'n';  break;
+            case '\r': out[j++] = '\\'; out[j++] = 'r';  break;
+            case '\t': out[j++] = '\\'; out[j++] = 't';  break;
+            case '\b': out[j++] = '\\'; out[j++] = 'b';  break;
+            case '\f': out[j++] = '\\'; out[j++] = 'f';  break;
+            default:
+                if (c < 0x20) {
+                    if (j + 8 >= cap) { cap *= 2; char *tmp = realloc(out, cap); if (!tmp) { free(out); return NULL; } out = tmp; }
+                    j += snprintf(out + j, cap - j, "\\u%04x", c);
+                } else {
+                    out[j++] = c;
+                }
+                break;
+        }
+    }
+    out[j] = '\0';
+    return out;
+}
 
 static void *ai_worker_loop(void *arg) {
     (void)arg;
@@ -151,14 +185,16 @@ static int is_model_usable(AIModel *model) {
 }
 
 static double compute_model_score(AIModel *m) {
-    double latency_score = 0.0, error_score = 0.0, health_score = 0.0;
+    double latency_score = 0.0, error_score = 0.0, health_score = 0.0, cost_score = 0.0;
     if (m->total_calls > 0) {
         double avg_lat = (double)m->total_latency_us / m->total_calls;
         latency_score = avg_lat / 1000000.0;
         error_score = 0.0;
+        cost_score = m->cost_account.total_cost_usd / (double)m->total_calls * 10.0;
     } else {
         latency_score = 1.0;
         error_score = 0.5;
+        cost_score = 5.0;
     }
     switch (m->health.state) {
         case MODEL_STATE_HEALTHY:   health_score = 0.0; break;
@@ -166,7 +202,7 @@ static double compute_model_score(AIModel *m) {
         case MODEL_STATE_RATE_LIMITED: health_score = 5.0; break;
         default: health_score = 10.0; break;
     }
-    return latency_score * 0.5 + error_score * 0.3 + health_score * 0.2;
+    return latency_score * 0.4 + error_score * 0.2 + health_score * 0.2 + cost_score * 0.2;
 }
 
 static int submit_ai_work(AIModel *model, const char *prompt, char *response, size_t response_size) {
@@ -263,36 +299,65 @@ static int estimate_tokens(const char *prompt) {
     return tokens + 4;
 }
 
-static char *build_openai_payload(const char *model_name, const char *prompt, float temp, int max_tokens) {
-    size_t len = strlen(prompt) + 512;
+static char *build_openai_payload_full(const char *model_name, const char *prompt, float temp, int max_tokens,
+                                        const char *tools_json, const char *response_format_json,
+                                        const char *multi_modal_content) {
+    char *escaped = json_escape(prompt);
+    if (!escaped) return NULL;
+    char *emodel = json_escape(model_name);
+    if (!emodel) { free(escaped); return NULL; }
+    size_t len = strlen(escaped) + strlen(emodel) + 1024;
+    if (tools_json) len += strlen(tools_json) + 64;
+    if (response_format_json) len += strlen(response_format_json) + 64;
+    if (multi_modal_content) len += strlen(multi_modal_content);
     char *json = malloc(len);
-    if (!json) return NULL;
+    if (!json) { free(escaped); free(emodel); return NULL; }
+
+    const char *content_field = multi_modal_content ? multi_modal_content : escaped;
     snprintf(json, len,
-        "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], "
-        "\"temperature\": %.2f, \"max_tokens\": %d}",
-        model_name, prompt, temp, max_tokens);
+        "{\"model\": \"%s\", \"messages\": [{\"role\": \"user\", \"content\": %s}], "
+        "\"temperature\": %.2f, \"max_tokens\": %d%s%s}",
+        emodel,
+        multi_modal_content ? content_field : escaped,
+        temp, max_tokens,
+        tools_json ? ", \"tools\": " : "",
+        tools_json ? tools_json : "",
+        response_format_json ? ", \"response_format\": " : "",
+        response_format_json ? response_format_json : "");
+    free(escaped);
+    free(emodel);
     return json;
 }
 
+static char *build_openai_payload(const char *model_name, const char *prompt, float temp, int max_tokens) {
+    return build_openai_payload_full(model_name, prompt, temp, max_tokens, NULL, NULL, NULL);
+}
+
 static char *build_anthropic_payload(const char *prompt, float temp, int max_tokens) {
-    size_t len = strlen(prompt) + 512;
+    char *escaped = json_escape(prompt);
+    if (!escaped) return NULL;
+    size_t len = strlen(escaped) + 512;
     char *json = malloc(len);
-    if (!json) return NULL;
+    if (!json) { free(escaped); return NULL; }
     snprintf(json, len,
         "{\"anthropic_version\": \"bedrock-2023-05-31\", \"max_tokens\": %d, "
         "\"messages\": [{\"role\": \"user\", \"content\": \"%s\"}], \"temperature\": %.2f}",
-        max_tokens, prompt, temp);
+        max_tokens, escaped, temp);
+    free(escaped);
     return json;
 }
 
 static char *build_gemini_payload(const char *prompt, float temp, int max_tokens) {
-    size_t len = strlen(prompt) + 512;
+    char *escaped = json_escape(prompt);
+    if (!escaped) return NULL;
+    size_t len = strlen(escaped) + 512;
     char *json = malloc(len);
-    if (!json) return NULL;
+    if (!json) { free(escaped); return NULL; }
     snprintf(json, len,
         "{\"contents\": [{\"parts\": [{\"text\": \"%s\"}]}], "
         "\"generationConfig\": {\"temperature\": %.2f, \"maxOutputTokens\": %d}}",
-        prompt, temp, max_tokens);
+        escaped, temp, max_tokens);
+    free(escaped);
     return json;
 }
 
@@ -602,6 +667,7 @@ static int send_to_model(AIModel *model, const char *prompt, char *response, siz
             model->account.total_output_tokens += out_tok;
             model->account.total_requests++;
             model->account.total_cost_usd += (in_tok * 5 + out_tok * 15) / 1000000;
+            gateway_update_cost(&model->cost_account, model->name, (int)in_tok, (int)out_tok);
             update_model_health(model, 1, AI_ERROR_NONE);
             obs_record_ai_call(model->provider, model->name, latency_us, in_tok, out_tok, 0, AI_ERROR_NONE);
         }
@@ -691,6 +757,10 @@ int prompt_router_add_model(const char *name, const char *api_endpoint, const ch
     model->name = strdup(name);
     model->api_endpoint = strdup(api_endpoint);
     model->api_key_env = strdup(api_key_env ? api_key_env : "OPENAI_API_KEY");
+    if (!model->name || !model->api_endpoint || !model->api_key_env) {
+        free(model->name); free(model->api_endpoint); free(model->api_key_env);
+        pthread_mutex_unlock(&global_router.mutex); return -1;
+    }
     model->max_tokens = max_tokens > 0 ? max_tokens : 4096;
     model->temperature = temperature;
     model->tier = (tier >= 1 && tier <= 4) ? tier : 2;
@@ -1024,6 +1094,89 @@ int prompt_router_get_model_health(const char *name, ModelHealth *health) {
         }
     }
     pthread_mutex_unlock(&global_router.mutex);
+    return -1;
+}
+
+int prompt_router_get_model_cost_account(const char *name, double *cost_usd) {
+    if (!name || !cost_usd) return -1;
+    pthread_mutex_lock(&global_router.mutex);
+    for (int i = 0; i < global_router.model_count; i++) {
+        if (strcmp(global_router.models[i].name, name) == 0) {
+            *cost_usd = global_router.models[i].cost_account.total_cost_usd;
+            pthread_mutex_unlock(&global_router.mutex);
+            return 0;
+        }
+    }
+    pthread_mutex_unlock(&global_router.mutex);
+    return -1;
+}
+
+int prompt_router_route_with_options(const char *prompt, const char *model_name, char *response, size_t response_size,
+                                      char *actual_model, size_t actual_model_size, int min_tier, int max_cost_cents) {
+    if (!prompt || !response || response_size == 0) return -1;
+    pthread_mutex_lock(&global_router.mutex);
+
+    AIModel *candidates[64];
+    int candidate_count = 0;
+
+    if (model_name && model_name[0] != '\0') {
+        for (int i = 0; i < global_router.model_count; i++) {
+            if (strcmp(global_router.models[i].name, model_name) == 0) {
+                if (provider_is_eligible(&global_router.models[i])) {
+                    if (global_router.models[i].tier >= min_tier) {
+                        double cost = global_router.models[i].cost_account.total_cost_usd;
+                        if (max_cost_cents <= 0 || cost * 100 <= max_cost_cents) {
+                            candidates[candidate_count++] = &global_router.models[i];
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    if (candidate_count == 0) {
+        AIModel *scored[64];
+        int scored_count = 0;
+        for (int i = 0; i < global_router.model_count; i++) {
+            if (provider_is_eligible(&global_router.models[i]) &&
+                global_router.models[i].tier >= min_tier) {
+                double cost = global_router.models[i].cost_account.total_cost_usd;
+                if (max_cost_cents <= 0 || cost * 100 <= max_cost_cents) {
+                    scored[scored_count++] = &global_router.models[i];
+                }
+            }
+        }
+        for (int i = 0; i < scored_count; i++) {
+            for (int j = i + 1; j < scored_count; j++) {
+                double si = compute_model_score(scored[i]);
+                double sj = compute_model_score(scored[j]);
+                if (si > sj) {
+                    AIModel *tmp = scored[i]; scored[i] = scored[j]; scored[j] = tmp;
+                }
+            }
+        }
+        for (int i = 0; i < scored_count && candidate_count < 64; i++) {
+            candidates[candidate_count++] = scored[i];
+        }
+    }
+
+    pthread_mutex_unlock(&global_router.mutex);
+
+    for (int i = 0; i < candidate_count; i++) {
+        AIModel *model = candidates[i];
+        int result = submit_ai_work(model, prompt, response, response_size);
+        if (result == 0) {
+            if (actual_model && actual_model_size > 0) {
+                strncpy(actual_model, model->name, actual_model_size - 1);
+                actual_model[actual_model_size - 1] = '\0';
+            }
+            return 0;
+        }
+    }
+
+    snprintf(response, response_size, "{\"error\": \"No eligible AI models found\"}");
+    if (actual_model && actual_model_size > 0) actual_model[0] = '\0';
     return -1;
 }
 

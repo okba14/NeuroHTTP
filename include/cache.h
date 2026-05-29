@@ -2,6 +2,12 @@
 #define AIONIC_CACHE_H
 
 #include <time.h>
+#include <stddef.h>
+
+typedef enum {
+    CACHE_BACKEND_MEMORY,
+    CACHE_BACKEND_REDIS
+} CacheBackend;
 
 typedef struct {
     char *key;
@@ -13,12 +19,14 @@ typedef struct {
 } CacheEntry;
 
 int cache_init(int size, int ttl);
+int cache_init_redis(const char *redis_host, int redis_port, const char *redis_password);
 int cache_set(const char *key, const char *value, size_t value_size, int ttl);
 int cache_get(const char *key, char *value, size_t value_size);
 int cache_delete(const char *key);
 int cache_clear(void);
 int cache_get_stats(int *entries, int *hits, int *misses);
 void cache_cleanup(void);
+CacheBackend cache_active_backend(void);
 
 int cache_semantic_get(const char *prompt, const char *model, char *value, size_t value_size, double min_similarity);
 int cache_semantic_set(const char *prompt, const char *model, const char *value, size_t value_size, int ttl);

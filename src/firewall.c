@@ -47,7 +47,7 @@ typedef struct {
     FirewallStats stats;
 } Firewall;
 
-static Firewall global_firewall;
+static Firewall global_firewall = { .mutex = PTHREAD_MUTEX_INITIALIZER };
 
 // ===== Static Helper Functions =====
 
@@ -547,8 +547,8 @@ int firewall_add_to_whitelist(const char *ip_address, int permanent, time_t dura
     }
     
     global_firewall.whitelist = new_whitelist;
-    strncpy(global_firewall.whitelist[global_firewall.whitelist_count].ip_address, ip_address, INET6_ADDRSTRLEN - 1);
-    global_firewall.whitelist[global_firewall.whitelist_count].ip_address[INET6_ADDRSTRLEN - 1] = '\0';
+    strncpy(global_firewall.whitelist[global_firewall.whitelist_count].ip_address, ip_address, sizeof(global_firewall.whitelist[global_firewall.whitelist_count].ip_address) - 1);
+    global_firewall.whitelist[global_firewall.whitelist_count].ip_address[sizeof(global_firewall.whitelist[global_firewall.whitelist_count].ip_address) - 1] = '\0';
     global_firewall.whitelist[global_firewall.whitelist_count].permanent = permanent;
     global_firewall.whitelist[global_firewall.whitelist_count].expiry_time = permanent ? 0 : time(NULL) + duration;
     global_firewall.whitelist_count++;
@@ -617,8 +617,8 @@ int firewall_add_to_blacklist(const char *ip_address, BlockReason reason, const 
     }
     
     global_firewall.blacklist = new_blacklist;
-    strncpy(global_firewall.blacklist[global_firewall.blacklist_count].ip_address, ip_address, INET6_ADDRSTRLEN - 1);
-    global_firewall.blacklist[global_firewall.blacklist_count].ip_address[INET6_ADDRSTRLEN - 1] = '\0';
+    strncpy(global_firewall.blacklist[global_firewall.blacklist_count].ip_address, ip_address, sizeof(global_firewall.blacklist[global_firewall.blacklist_count].ip_address) - 1);
+    global_firewall.blacklist[global_firewall.blacklist_count].ip_address[sizeof(global_firewall.blacklist[global_firewall.blacklist_count].ip_address) - 1] = '\0';
     global_firewall.blacklist[global_firewall.blacklist_count].added_time = time(NULL);
     global_firewall.blacklist[global_firewall.blacklist_count].reason = reason;
     strncpy(global_firewall.blacklist[global_firewall.blacklist_count].description, description, 255);
@@ -924,6 +924,13 @@ int firewall_clear_all(void) {
     free(global_firewall.attack_patterns);
     free(global_firewall.whitelist);
     free(global_firewall.blacklist);
+    
+    // Nullify freed pointers
+    global_firewall.entries = NULL;
+    global_firewall.allowed_api_keys = NULL;
+    global_firewall.attack_patterns = NULL;
+    global_firewall.whitelist = NULL;
+    global_firewall.blacklist = NULL;
     
     // Reset counters
     global_firewall.entry_count = 0;

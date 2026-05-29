@@ -38,13 +38,38 @@ Once a report is received:
 This policy covers:
 - Core server code (`src/`)
 - Thread and memory management routines
-- Networking stack and protocol handlers (HTTP/3, WebSockets, gRPC)
+- Networking stack and protocol handlers (HTTP/1.1, HTTP/2, TLS)
 - Plugin and module interface (`plugins/`)
 - Authentication, API key, and token mechanisms
 
 It does **not** cover:
-- Third-party libraries used (e.g., mbedTLS, protobuf-c)
+- Third-party libraries used (e.g., OpenSSL, libnghttp2, libcurl)
 - User-created plugins or modifications
+
+> **Note:** HTTP/3, WebSocket, and gRPC support are planned but not yet implemented.
+> Claims in other documents about their current availability are aspirational.
+
+---
+
+## 🔍 Known Security Audit Findings (May 2026)
+
+The following issues were identified during a comprehensive code audit. They should be addressed before production deployment:
+
+### CRITICAL
+- **Stack buffer overflow in base64 decoder** (`src/server.c:57-65`): `b64_decode()` writes decoded output without checking against the provided output buffer size. An oversized HTTP2-Settings header can overflow a 128-byte stack buffer. **Fixed in latest commit**.
+- **Placeholder API key in config** (`config/aionic.conf`): The tracked config file previously contained `api_key = your-secret-api-key-here`. API keys should only be supplied via environment variables. **Fixed in latest commit**.
+
+### HIGH
+- **Content-Length integer overflow** (`src/server.c:284,894`): Parsing `Content-Length` with `atoi()` allows negative values and silent wraparound, potentially bypassing body size checks. **Fixed in latest commit** (uses `strtol` with validation).
+- **Uninitialized firewall mutex** (`src/firewall.c:50`): `global_firewall.mutex` was used without static or dynamic initialization. **Fixed in latest commit**.
+
+### MEDIUM
+- **Unchecked strdup() returns in config parser** (`src/config.c:43,90-93`): OOM conditions could lead to NULL pointer dereference. **Fixed in latest commit**.
+- **Empty plugin file** (`plugins/limiter.c`): 0-byte file would crash `dlopen`. **Fixed in latest commit**.
+
+### Notes
+- `config/key.pem` and `config/cert.pem` exist on disk but are gitignored (`config/*.pem` in `.gitignore`). They should be treated as secrets and regenerated for production.
+- The AI model definitions in `aionic.conf` correctly reference environment variable names (e.g., `GROQ_API_KEY`) rather than embedding keys.
 
 ---
 

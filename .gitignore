@@ -53,3 +53,5 @@ logs/
 # Misc
 tags
 info_future.txt
+*.pem
+config/*.pem

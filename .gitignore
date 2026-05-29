@@ -1,4 +1,13 @@
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
 # Build artifacts
+# =========================
 build/
 bin/
 obj/
@@ -8,50 +17,77 @@ obj/
 *.so
 *.a
 
-# Compilers / editors
+# =========================
+# Compilers / debug artifacts
+# =========================
 *.dSYM/
 *.d
 *.lst
 *.map
 
+# Memory dumps
+*.stackdump
+
+# =========================
 # Temp & logs
+# =========================
 *~
 *.swp
 *.swo
 *.tmp
 *.log
 
+# =========================
 # IDEs
+# =========================
 .vscode/
 .idea/
 
+# =========================
 # CMake
+# =========================
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
 
+# =========================
+# Coverage / tests
+# =========================
+coverage/
+*.gcda
+*.gcno
+
+# =========================
 # Dist / packaging
+# =========================
 dist/
 release/
 *.tar.gz
 *.zip
 
+# =========================
 # Core dumps
+# =========================
 core
 core.*
 
+# =========================
 # Runtime
+# =========================
 logs/
 *.pid
 
-# Secrets
+# =========================
+# Secrets (VERY IMPORTANT)
+# =========================
 .env
 *.key
 *.pem
+config/*.pem
 
+# =========================
 # Misc
+# =========================
 tags
 info_future.txt
-*.pem
-config/*.pem
